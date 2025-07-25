@@ -3,11 +3,7 @@ import { useState } from 'react';
 import { Mail, Chrome, Eye, EyeOff } from 'lucide-react';
 import { signInWithEmail, signUpWithEmail, signInWithGoogle } from '../lib/supabase';
 
-interface LoginPageProps {
-  onLogin: () => void;
-}
-
-export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
+export const LoginPage: React.FC = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,7 +24,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       } else {
         const { error } = await signInWithEmail(email, password);
         if (error) throw error;
-        onLogin();
+        // Auth state change will be handled by App.tsx
       }
     } catch (error: any) {
       setError(error.message);
@@ -44,7 +40,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     try {
       const { error } = await signInWithGoogle();
       if (error) throw error;
-      // Google auth will redirect, so onLogin will be called after redirect
+      // Google auth will redirect, auth state change will be handled by App.tsx
     } catch (error: any) {
       setError(error.message);
       setLoading(false);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useCallback } from 'react';
 import { supabase, getCurrentUser } from './lib/supabase';
 import { LoginPage } from './components/LoginPage';
 import { MainPage } from './components/MainPage';
@@ -19,6 +20,32 @@ function App() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [user, setUser] = useState<any>(null);
 
+  // Centralized AI companion initialization
+  const initializeAICompanion = useCallback(async () => {
+    setIsInitializing(true);
+    try {
+      console.log('Initializing AI companion...');
+      
+      // Validate required API keys
+      if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your-openrouter-api-key-here') {
+        throw new Error('OpenRouter API key is required for AI responses. Please set VITE_OPENROUTER_API_KEY in your environment variables.');
+      }
+
+      const newCompanion = new EmotionalAICompanion(OPENROUTER_API_KEY, configManager);
+      setCompanion(newCompanion);
+      setCurrentPage('main');
+      console.log('AI companion initialized successfully');
+    } catch (error) {
+      console.error('AI companion initialization error:', error);
+      alert(`Initialization failed: ${error}`);
+      // Reset to login page if initialization fails
+      setCurrentPage('login');
+      setCompanion(null);
+    } finally {
+      setIsInitializing(false);
+    }
+  }, [configManager]);
+
   useEffect(() => {
     // Check for existing session
     const checkAuth = async () => {
@@ -26,7 +53,8 @@ function App() {
         const { user } = await getCurrentUser();
         if (user) {
           setUser(user);
-          setCurrentPage('main');
+          // Initialize AI companion for existing session
+          await initializeAICompanion();
         }
       } catch (error) {
         console.error('Auth check error:', error);
@@ -44,7 +72,8 @@ function App() {
         
         if (session?.user) {
           setUser(session.user);
-          setCurrentPage('main');
+          // Initialize AI companion for new session
+          await initializeAICompanion();
         } else {
           setUser(null);
           setCurrentPage('login');
@@ -65,28 +94,7 @@ function App() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [configManager]);
-
-  const handleLogin = async () => {
-    setIsInitializing(true);
-    try {
-      console.log('Initializing AI companion...');
-      
-      // Validate required API keys
-      if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your-openrouter-api-key-here') {
-        throw new Error('OpenRouter API key is required for AI responses. Please set VITE_OPENROUTER_API_KEY in your environment variables.');
-      }
-
-      const newCompanion = new EmotionalAICompanion(OPENROUTER_API_KEY, configManager);
-      setCompanion(newCompanion);
-      console.log('Login successful, navigating to main page');
-    } catch (error) {
-      console.error('Login error:', error);
-      alert(`Login failed: ${error}`);
-    } finally {
-      setIsInitializing(false);
-    }
-  };
+  }, [configManager, initializeAICompanion]);
 
   if (isCheckingAuth) {
     return (
@@ -112,7 +120,7 @@ function App() {
   }
 
   if (currentPage === 'login') {
-    return <LoginPage onLogin={handleLogin} />;
+    return <LoginPage />;
   }
 
   if (currentPage === 'main' && companion) {
