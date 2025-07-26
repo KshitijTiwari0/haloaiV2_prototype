@@ -113,7 +113,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         </div>
 
         {/* Record Button */}
-        <div className="mb-8">
+        <div className="mb-12">
           <button
             onClick={handleRecord}
             disabled={isRecording || isProcessing}
@@ -127,7 +127,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
           </button>
         </div>
 
-        {/* Status Messages */}
+        {/* Hidden Status Messages - Only show errors */}
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-500 rounded-lg">
             <p className="text-red-200">❌ {error}</p>
@@ -137,28 +137,6 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             >
               Dismiss
             </button>
-          </div>
-        )}
-
-        {success && (
-          <div className="mb-4 p-4 bg-emerald-900/30 border border-emerald-500 rounded-lg">
-            <p className="text-emerald-200">✅ {success}</p>
-          </div>
-        )}
-
-        {currentInteraction && (
-          <div className="mb-4 p-4 bg-blue-900/30 border border-blue-500 rounded-lg">
-            <div className="flex items-start space-x-2">
-              <MessageCircle size={16} className="mt-1 text-blue-400" />
-              <div className="text-left">
-                <p className="text-blue-200">
-                  <strong>AI:</strong> {currentInteraction.ai_response}
-                </p>
-                <p className="text-xs text-blue-300 mt-1">
-                  Response time: {currentInteraction.response_time.toFixed(2)}s
-                </p>
-              </div>
-            </div>
           </div>
         )}
 
