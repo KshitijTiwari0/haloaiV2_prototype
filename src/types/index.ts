@@ -41,6 +41,25 @@ export interface Interaction {
   response_time: number;
 }
 
+export interface DatabaseInteraction {
+  id: string;
+  user_id: string;
+  timestamp: string;
+  user_input: string;
+  ai_response: string;
+  feature_description: string | null;
+  response_time: number;
+  created_at: string;
+}
+
+export interface UserProfile {
+  id: string;
+  user_id: string;
+  preferences: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Config {
   voice_id: string;
   silence_threshold: number;

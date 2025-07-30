@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { DatabaseInteraction } from '../types';
 
 export class ResponseGenerator {
   private apiKey: string;
@@ -11,8 +12,32 @@ export class ResponseGenerator {
     this.baseUrl = "https://openrouter.ai/api/v1/chat/completions";
   }
 
-  async generateResponse(transcribedText: string, featureDescription: string): Promise<string> {
+  async generateResponse(
+    transcribedText: string, 
+    featureDescription: string,
+    conversationHistory: DatabaseInteraction[] = [],
+    userPreferences: Record<string, any> = {}
+  ): Promise<string> {
     try {
+      // Format conversation history for context
+      const historyContext = conversationHistory.length > 0 
+        ? "\n\nRecent conversation history:\n" + 
+          conversationHistory
+            .reverse() // Show oldest first for chronological order
+            .map(interaction => 
+              `User: ${interaction.user_input}\nAI: ${interaction.ai_response}`
+            )
+            .join('\n\n')
+        : '';
+
+      // Format user preferences for context
+      const preferencesContext = Object.keys(userPreferences).length > 0
+        ? "\n\nWhat I know about you:\n" + 
+          Object.entries(userPreferences)
+            .map(([key, value]) => `- ${key}: ${JSON.stringify(value)}`)
+            .join('\n')
+        : '';
+
       const systemPrompt = `You are a supportive friend who understands emotions through words and tone.
 
 Here are examples of how to respond naturally:
@@ -28,9 +53,11 @@ Here are examples of how to respond naturally:
 - If the user says 'Everything's great!' with a flat tone: 'You're saying it's great, but you don't sound so sure. What's up?'
 - If the user says 'I messed up big time' with a shaky tone: 'Oh no, you sound really shaken. What happened? I'm here for you.'
 
+${historyContext}${preferencesContext}
+
 Now, the user said: '${transcribedText}'. Their voice has these traits: ${featureDescription}.
 
-Respond in a warm, natural way, reflecting their possible emotional state if it fits. Do NOT mention audio features or analysis. Keep it short (1-3 sentences) and vary your phrasing for a lively feel.`;
+Respond in a warm, natural way, reflecting their possible emotional state if it fits. Use the conversation history and what you know about them to provide more personalized responses. Do NOT mention audio features, analysis, or that you're referencing previous conversations. Keep it short (1-3 sentences) and vary your phrasing for a lively feel.`;
 
       const payload = {
         model: this.model,
@@ -38,7 +65,7 @@ Respond in a warm, natural way, reflecting their possible emotional state if it 
           { role: "system", content: systemPrompt },
           { role: "user", content: transcribedText }
         ],
-        max_tokens: 150,
+        max_tokens: 200,
         temperature: 0.9
       };
 
@@ -49,7 +76,7 @@ Respond in a warm, natural way, reflecting their possible emotional state if it 
 
       const response = await axios.post(this.baseUrl, payload, { 
         headers,
-        timeout: 10000
+        timeout: 15000
       });
 
       return response.data.choices[0].message.content.trim();

@@ -3,7 +3,8 @@ import { EmotionDetector } from './EmotionDetector';
 import { ResponseGenerator } from './ResponseGenerator';
 import { TextToSpeechEngine } from './TextToSpeechEngine';
 import { ConfigManager } from './ConfigManager';
-import { Interaction } from '../types';
+import { Interaction, DatabaseInteraction, UserProfile } from '../types';
+import { supabase } from '../lib/supabase';
 
 export class EmotionalAICompanion {
   private audioProcessor: AudioProcessor;
@@ -12,6 +13,7 @@ export class EmotionalAICompanion {
   private ttsEngine: TextToSpeechEngine;
   private configManager: ConfigManager;
   private conversationLog: Interaction[] = [];
+  private currentUserId: string | null = null;
 
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -22,6 +24,148 @@ export class EmotionalAICompanion {
       configManager.get('eleven_labs_api_key'),
       configManager.get('voice_id') || "21m00Tcm4TlvDq8ikWAM"
     );
+    this.initializeUser();
+  }
+
+  private async initializeUser(): Promise<void> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        this.currentUserId = user.id;
+        console.log('AI Companion initialized for user:', user.email);
+      }
+    } catch (error) {
+      console.error('Error initializing user:', error);
+    }
+  }
+
+  async getRecentInteractions(limit: number = 5): Promise<DatabaseInteraction[]> {
+    if (!this.currentUserId) {
+      console.warn('No authenticated user for retrieving interactions');
+      return [];
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('interactions')
+        .select('*')
+        .eq('user_id', this.currentUserId)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('Error fetching interactions:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error retrieving recent interactions:', error);
+      return [];
+    }
+  }
+
+  async getUserProfile(): Promise<Record<string, any>> {
+    if (!this.currentUserId) {
+      console.warn('No authenticated user for retrieving profile');
+      return {};
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('preferences')
+        .eq('user_id', this.currentUserId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No profile exists yet, create one
+          await this.createUserProfile();
+          return {};
+        }
+        console.error('Error fetching user profile:', error);
+        return {};
+      }
+
+      return data?.preferences || {};
+    } catch (error) {
+      console.error('Error retrieving user profile:', error);
+      return {};
+    }
+  }
+
+  private async createUserProfile(): Promise<void> {
+    if (!this.currentUserId) return;
+
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .insert({
+          user_id: this.currentUserId,
+          preferences: {}
+        });
+
+      if (error) {
+        console.error('Error creating user profile:', error);
+      } else {
+        console.log('User profile created successfully');
+      }
+    } catch (error) {
+      console.error('Error creating user profile:', error);
+    }
+  }
+
+  async updateUserProfile(preferences: Record<string, any>): Promise<void> {
+    if (!this.currentUserId) {
+      console.warn('No authenticated user for updating profile');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: this.currentUserId,
+          preferences: preferences
+        });
+
+      if (error) {
+        console.error('Error updating user profile:', error);
+      } else {
+        console.log('User profile updated successfully');
+      }
+    } catch (error) {
+      console.error('Error updating user profile:', error);
+    }
+  }
+
+  private async saveInteraction(interaction: Interaction): Promise<void> {
+    if (!this.currentUserId) {
+      console.warn('No authenticated user for saving interaction');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('interactions')
+        .insert({
+          user_id: this.currentUserId,
+          timestamp: interaction.timestamp,
+          user_input: interaction.user_input,
+          ai_response: interaction.ai_response,
+          feature_description: interaction.feature_description,
+          response_time: interaction.response_time
+        });
+
+      if (error) {
+        console.error('Error saving interaction:', error);
+      } else {
+        console.log('Interaction saved to database successfully');
+      }
+    } catch (error) {
+      console.error('Error saving interaction:', error);
+    }
   }
 
   async startRecording(): Promise<void> {
@@ -52,8 +196,17 @@ export class EmotionalAICompanion {
       const description = emotionResult.description;
       const userInput = transcribedText || "Audio input processed";
 
+      // Get conversation history and user preferences for context
+      const recentInteractions = await this.getRecentInteractions(3);
+      const userPreferences = await this.getUserProfile();
+
       // Generate AI response
-      const responseText = await this.responseGenerator.generateResponse(userInput, description);
+      const responseText = await this.responseGenerator.generateResponse(
+        userInput, 
+        description, 
+        recentInteractions, 
+        userPreferences
+      );
       
       if (responseText) {
         console.log(`Generated response: ${responseText}`);
@@ -74,6 +227,10 @@ export class EmotionalAICompanion {
       };
 
       this.conversationLog.push(interaction);
+      
+      // Save interaction to database
+      await this.saveInteraction(interaction);
+      
       console.log(`Interaction logged - Response time: ${interaction.response_time.toFixed(2)}s`);
       
       return interaction;
