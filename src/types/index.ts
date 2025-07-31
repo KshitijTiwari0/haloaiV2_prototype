@@ -39,6 +39,7 @@ export interface Interaction {
   feature_description: string;
   ai_response: string;
   response_time: number;
+  user_mood?: string;
 }
 
 export interface DatabaseInteraction {
@@ -50,6 +51,7 @@ export interface DatabaseInteraction {
   feature_description: string | null;
   response_time: number;
   created_at: string;
+  user_mood: string | null;
 }
 
 export interface UserProfile {

@@ -25,7 +25,7 @@ export class ResponseGenerator {
           conversationHistory
             .reverse() // Show oldest first for chronological order
             .map(interaction => 
-              `User: ${interaction.user_input}\nAI: ${interaction.ai_response}`
+              `User (${interaction.user_mood || 'unknown mood'}): ${interaction.user_input}\nAI: ${interaction.ai_response}`
             )
             .join('\n\n')
         : '';
@@ -53,11 +53,13 @@ Here are examples of how to respond naturally:
 - If the user says 'Everything's great!' with a flat tone: 'You're saying it's great, but you don't sound so sure. What's up?'
 - If the user says 'I messed up big time' with a shaky tone: 'Oh no, you sound really shaken. What happened? I'm here for you.'
 
+Pay attention to mood patterns in the conversation history. If someone was sad yesterday and seems excited today, acknowledge the positive change. If they've been stressed for multiple interactions, show extra empathy and support.
+
 ${historyContext}${preferencesContext}
 
-Now, the user said: '${transcribedText}'. Their voice has these traits: ${featureDescription}.
+Now, the user said: '${transcribedText}'. Their current mood appears to be: ${userPreferences.current_mood || 'analyzing'}. Their voice has these traits: ${featureDescription}.
 
-Respond in a warm, natural way, reflecting their possible emotional state if it fits. Use the conversation history and what you know about them to provide more personalized responses. Do NOT mention audio features, analysis, or that you're referencing previous conversations. Keep it short (1-3 sentences) and vary your phrasing for a lively feel.`;
+Respond in a warm, natural way, reflecting their current mood and emotional state. Use the conversation history and mood patterns to provide more personalized responses. Do NOT mention audio features, analysis, mood detection, or that you're referencing previous conversations. Keep it short (1-3 sentences) and vary your phrasing for a lively feel.`;
 
       const payload = {
         model: this.model,

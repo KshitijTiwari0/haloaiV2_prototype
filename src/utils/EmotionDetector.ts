@@ -259,4 +259,45 @@ export class EmotionDetector {
     
     return description;
   }
+
+  extractMoodFromFeatures(features: AudioFeatures): string {
+    // Simple mood classification based on audio features
+    const pitch = features.pitch_mean || 0;
+    const energy = features.energy_mean || 0;
+    const silenceRatio = features.silence_ratio || 0;
+    const tempo = features.tempo || 0;
+    
+    // High energy, high pitch, low silence = excited/happy
+    if (energy > 0.1 && pitch > 200 && silenceRatio < 0.3) {
+      return "excited";
+    }
+    
+    // Low energy, low pitch, high silence = sad/tired
+    if (energy < 0.05 && pitch < 150 && silenceRatio > 0.5) {
+      return "sad";
+    }
+    
+    // High energy, variable pitch, low silence = stressed/anxious
+    if (energy > 0.08 && (features.pitch_std || 0) > 50 && silenceRatio < 0.4) {
+      return "stressed";
+    }
+    
+    // Moderate energy, stable pitch = calm/neutral
+    if (energy > 0.03 && energy < 0.08 && (features.pitch_std || 0) < 30) {
+      return "calm";
+    }
+    
+    // Fast speaking rate = excited/nervous
+    if (features.speaking_rate && features.speaking_rate > 180) {
+      return "excited";
+    }
+    
+    // Slow speaking rate = tired/contemplative
+    if (features.speaking_rate && features.speaking_rate < 120) {
+      return "contemplative";
+    }
+    
+    // Default fallback
+    return "neutral";
+  }
 }

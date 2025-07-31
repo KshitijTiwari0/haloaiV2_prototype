@@ -155,13 +155,17 @@ export class EmotionalAICompanion {
           user_input: interaction.user_input,
           ai_response: interaction.ai_response,
           feature_description: interaction.feature_description,
-          response_time: interaction.response_time
+          response_time: interaction.response_time,
+          user_mood: interaction.user_mood || null
         });
 
       if (error) {
         console.error('Error saving interaction:', error);
       } else {
-        console.log('Interaction saved to database successfully');
+        console.log('Interaction saved to database successfully', {
+          mood: interaction.user_mood,
+          user_input: interaction.user_input.substring(0, 50) + '...'
+        });
       }
     } catch (error) {
       console.error('Error saving interaction:', error);
@@ -185,6 +189,10 @@ export class EmotionalAICompanion {
       // Extract emotion features
       const emotionResult = await this.emotionDetector.detectEmotion(audioBlob);
       const features = emotionResult.features;
+      
+      // Extract user mood from audio features
+      const userMood = this.emotionDetector.extractMoodFromFeatures(features);
+      console.log('Detected user mood:', userMood);
 
       // Calculate speaking rate if we have transcription
       if (transcribedText && features.duration && features.duration > 0) {
@@ -223,7 +231,8 @@ export class EmotionalAICompanion {
         user_input: userInput,
         feature_description: description,
         ai_response: responseText,
-        response_time: (Date.now() - startTime) / 1000
+        response_time: (Date.now() - startTime) / 1000,
+        user_mood: userMood
       };
 
       this.conversationLog.push(interaction);
@@ -231,7 +240,7 @@ export class EmotionalAICompanion {
       // Save interaction to database
       await this.saveInteraction(interaction);
       
-      console.log(`Interaction logged - Response time: ${interaction.response_time.toFixed(2)}s`);
+      console.log(`Interaction logged - Response time: ${interaction.response_time.toFixed(2)}s, Mood: ${userMood}`);
       
       return interaction;
     } catch (error) {
