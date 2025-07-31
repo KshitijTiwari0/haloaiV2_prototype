@@ -190,10 +190,6 @@ export class EmotionalAICompanion {
       const emotionResult = await this.emotionDetector.detectEmotion(audioBlob);
       const features = emotionResult.features;
       
-      // Extract user mood from audio features
-      const userMood = this.emotionDetector.extractMoodFromFeatures(features);
-      console.log('Detected user mood:', userMood);
-
       // Calculate speaking rate if we have transcription
       if (transcribedText && features.duration && features.duration > 0) {
         const numWords = transcribedText.split(' ').length;
@@ -209,28 +205,32 @@ export class EmotionalAICompanion {
       const userPreferences = await this.getUserProfile();
 
       // Generate AI response
-      const responseText = await this.responseGenerator.generateResponse(
+      const llmResponse = await this.responseGenerator.generateResponse(
         userInput, 
         description, 
         recentInteractions, 
         userPreferences
       );
       
-      if (responseText) {
-        console.log(`Generated response: ${responseText}`);
+      if (llmResponse.ai_response) {
+        console.log(`Generated response: ${llmResponse.ai_response}`);
+        console.log(`AI-detected user mood: ${llmResponse.user_mood}`);
         // Speak the response
-        await this.ttsEngine.speakText(responseText);
+        await this.ttsEngine.speakText(llmResponse.ai_response);
       } else {
         console.warn('No response text generated, skipping TTS');
         throw new Error('No response text generated');
       }
+
+      // Extract mood determined by AI
+      const userMood = llmResponse.user_mood;
 
       // Create interaction record
       const interaction: Interaction = {
         timestamp: new Date().toISOString(),
         user_input: userInput,
         feature_description: description,
-        ai_response: responseText,
+        ai_response: llmResponse.ai_response,
         response_time: (Date.now() - startTime) / 1000,
         user_mood: userMood
       };

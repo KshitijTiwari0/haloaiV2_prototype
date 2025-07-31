@@ -42,6 +42,11 @@ export interface Interaction {
   user_mood?: string;
 }
 
+export interface LLMResponse {
+  ai_response: string;
+  user_mood: string;
+}
+
 export interface DatabaseInteraction {
   id: string;
   user_id: string;
