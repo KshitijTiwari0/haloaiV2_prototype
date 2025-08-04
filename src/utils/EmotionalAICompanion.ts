@@ -53,7 +53,7 @@ export class EmotionalAICompanion {
       const transcribedText = await this.transcribeAudio(audioBlob);
       if (!transcribedText) {
         console.warn('Transcription failed or produced no text.');
-        return;
+        return; // Return to listening if transcription fails
       }
       console.log('User said:', transcribedText);
 
@@ -62,6 +62,7 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error processing utterance:', error);
     } finally {
+      // This block is crucial. It ALWAYS runs, ensuring the AI starts listening again.
       this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
       console.log('--- Ready for next user input ---');
@@ -82,6 +83,7 @@ export class EmotionalAICompanion {
       if (llmResponse.ai_response) {
         console.log('AI will say:', llmResponse.ai_response);
         
+        // Wait for the AI to finish speaking before continuing
         await this.ttsEngine.speakText(llmResponse.ai_response);
         console.log('AI finished speaking.');
 
@@ -126,10 +128,15 @@ export class EmotionalAICompanion {
 
   private async saveInteraction(interaction: Interaction): Promise<void> {
     if (!this.currentUserId) return;
-    await supabase.from('interactions').insert({
+    await supabase.from('interactions').insert([{
         user_id: this.currentUserId,
-        ...interaction
-    });
+        timestamp: interaction.timestamp,
+        user_input: interaction.user_input,
+        ai_response: interaction.ai_response,
+        feature_description: interaction.feature_description,
+        response_time: interaction.response_time,
+        user_mood: interaction.user_mood,
+    }]);
   }
 
   private async getRecentInteractions(limit: number = 5): Promise<DatabaseInteraction[]> {

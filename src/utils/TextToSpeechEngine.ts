@@ -44,22 +44,17 @@ export class TextToSpeechEngine {
 
   private async speakWithElevenLabs(text: string): Promise<void> {
     try {
-      console.log(`Attempting to use Eleven Labs API for text: ${text.substring(0, 50)}...`);
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`;
       const headers = {
         'xi-api-key': this.elevenLabsApiKey!,
-        'Content-Type': 'application/json',
-        'Accept': 'audio/mpeg'
+        'Content-Type': 'application/json', 'Accept': 'audio/mpeg'
       };
       const data = {
-        text: text,
-        model_id: "eleven_monolingual_v1",
+        text: text, model_id: "eleven_monolingual_v1",
         voice_settings: { stability: 0.5, similarity_boost: 0.5 }
       };
       const response = await axios.post(url, data, {
-        headers,
-        timeout: 20000,
-        responseType: 'blob'
+        headers, timeout: 20000, responseType: 'blob'
       });
 
       if (response.status === 200) {
@@ -91,7 +86,6 @@ export class TextToSpeechEngine {
 
   public async speakText(text: string): Promise<void> {
     if (!text || text.trim() === "") {
-      console.warn('No valid text provided for TTS');
       return;
     }
     

@@ -11,10 +11,11 @@ export class AudioProcessor {
   private onSpeechStartCallback: (() => void) | null = null;
   private onSilenceCallback: (() => void) | null = null;
 
+  // VAD State using standard parameters
   private vadState: 'SILENT' | 'VOICE' = 'SILENT';
   private silenceFrames: number = 0;
-  private readonly requiredSilenceFrames = 15;
-  private readonly vadThreshold = 0.02;
+  private readonly requiredSilenceFrames = 15; // 1.5 seconds of silence
+  private readonly vadThreshold = 0.01; // Standard RMS threshold
 
   constructor() {
     this.testMicrophoneSetup();
@@ -24,13 +25,10 @@ export class AudioProcessor {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(device => device.kind === 'audioinput');
-      
       if (audioInputs.length === 0) {
         console.error('No microphone devices found');
         return false;
       }
-      
-      console.log(`Found ${audioInputs.length} audio input device(s)`);
       return true;
     } catch (error) {
       console.error('Microphone setup error:', error);
@@ -41,12 +39,7 @@ export class AudioProcessor {
   async startRecording(): Promise<void> {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        } 
+        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } 
       });
 
       this.audioContext = new AudioContext({ sampleRate: 16000 });
@@ -55,12 +48,8 @@ export class AudioProcessor {
       this.analyser.fftSize = 2048;
       source.connect(this.analyser);
 
-      this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-
+      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm;codecs=opus' });
       this.audioChunks = [];
-      
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
@@ -69,7 +58,6 @@ export class AudioProcessor {
           }
         }
       };
-
       this.mediaRecorder.start(100);
       console.log('Recording started');
     } catch (error) {
@@ -91,27 +79,28 @@ export class AudioProcessor {
   }
 
   private startVAD(): void {
+    const dataArray = new Float32Array(this.analyser!.fftSize);
     this.vadInterval = window.setInterval(() => {
       if (!this.analyser || this.isAITalking) {
         return;
       }
-
-      const bufferLength = this.analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      this.analyser.getByteFrequencyData(dataArray);
-
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
+      
+      this.analyser.getFloatTimeDomainData(dataArray);
+      
+      // Calculate RMS - the standard way to measure audio energy
+      let sumSquares = 0.0;
+      for (const amplitude of dataArray) {
+        sumSquares += amplitude * amplitude;
       }
-      const average = sum / bufferLength;
-      const isSpeech = average > (this.vadThreshold * 255);
+      const rms = Math.sqrt(sumSquares / dataArray.length);
+      const isSpeech = rms > this.vadThreshold;
 
       switch (this.vadState) {
         case 'SILENT':
           if (isSpeech) {
             this.vadState = 'VOICE';
             this.onSpeechStartCallback?.();
+            console.log(`Speech detected (RMS: ${rms.toFixed(4)})`);
           }
           break;
         case 'VOICE':
@@ -133,9 +122,12 @@ export class AudioProcessor {
     this.vadState = 'SILENT';
     this.silenceFrames = 0;
     if (this.currentUtteranceChunks.length > 0) {
+      console.log('Utterance ended, processing audio.');
       const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
       this.currentUtteranceChunks = [];
       this.onUtteranceEndCallback?.(utteranceBlob);
+    } else {
+        console.log('Silence detected, but no audio chunks to process.');
     }
   }
 
@@ -155,9 +147,7 @@ export class AudioProcessor {
   }
 
   private cleanup(): void {
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-    }
+    this.stream?.getTracks().forEach(track => track.stop());
     this.stream = null;
     this.audioContext = null;
     this.analyser = null;
@@ -186,13 +176,12 @@ export class AudioProcessor {
         body: JSON.stringify({ audio_url: uploadResult.upload_url })
       });
       const transcriptResult = await transcriptResponse.json();
-      let statusResult;
       while (true) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptResult.id}`, {
           headers: { 'authorization': apiKey }
         });
-        statusResult = await statusResponse.json();
+        const statusResult = await statusResponse.json();
         if (statusResult.status === 'completed') return statusResult.text || null;
         if (statusResult.status === 'error') throw new Error(statusResult.error);
       }
