@@ -16,6 +16,12 @@ export class EmotionalAICompanion {
   private currentUserId: string | null = null;
   private isCallActive: boolean = false;
 
+  // Callbacks to update the UI
+  private onSpeechStartCallback: (() => void) | null = null;
+  private onSpeechEndCallback: (() => void) | null = null;
+  private onProcessingStartCallback: (() => void) | null = null;
+  private onProcessingEndCallback: (() => void) | null = null;
+
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
     this.audioProcessor = new AudioProcessor();
@@ -38,6 +44,23 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error initializing user:', error);
     }
+  }
+
+  // Methods to set the callbacks from the UI
+  public setOnSpeechStart(callback: () => void) {
+    this.onSpeechStartCallback = callback;
+  }
+
+  public setOnSpeechEnd(callback: () => void) {
+    this.onSpeechEndCallback = callback;
+  }
+
+  public setOnProcessingStart(callback: () => void) {
+    this.onProcessingStartCallback = callback;
+  }
+
+  public setOnProcessingEnd(callback: () => void) {
+    this.onProcessingEndCallback = callback;
   }
 
   async getRecentInteractions(limit: number = 5): Promise<DatabaseInteraction[]> {
@@ -187,11 +210,9 @@ export class EmotionalAICompanion {
     try {
       const startTime = Date.now();
       
-      // Extract emotion features
       const emotionResult = await this.emotionDetector.detectEmotion(audioBlob);
       const features = emotionResult.features;
       
-      // Calculate speaking rate if we have transcription
       if (transcribedText && features.duration && features.duration > 0) {
         const numWords = transcribedText.split(' ').length;
         const speakingRate = (numWords / features.duration) * 60;
@@ -201,11 +222,9 @@ export class EmotionalAICompanion {
       const description = emotionResult.description;
       const userInput = transcribedText || "Audio input processed";
 
-      // Get conversation history and user preferences for context
       const recentInteractions = await this.getRecentInteractions(3);
       const userPreferences = await this.getUserProfile();
 
-      // Generate AI response
       const llmResponse = await this.responseGenerator.generateResponse(
         userInput, 
         description, 
@@ -216,17 +235,14 @@ export class EmotionalAICompanion {
       if (llmResponse.ai_response) {
         console.log(`Generated response: ${llmResponse.ai_response}`);
         console.log(`AI-detected user mood: ${llmResponse.user_mood}`);
-        // Speak the response
         await this.ttsEngine.speakText(llmResponse.ai_response);
       } else {
         console.warn('No response text generated, skipping TTS');
         throw new Error('No response text generated');
       }
 
-      // Extract mood determined by AI
       const userMood = llmResponse.user_mood;
 
-      // Create interaction record
       const interaction: Interaction = {
         timestamp: new Date().toISOString(),
         user_input: userInput,
@@ -237,8 +253,6 @@ export class EmotionalAICompanion {
       };
 
       this.conversationLog.push(interaction);
-      
-      // Save interaction to database
       await this.saveInteraction(interaction);
       
       console.log(`Interaction logged - Response time: ${interaction.response_time.toFixed(2)}s, Mood: ${userMood}`);
@@ -274,7 +288,6 @@ export class EmotionalAICompanion {
       this.isCallActive = true;
       console.log('Starting continuous call...');
 
-      const maxDuration = this.configManager.get('max_duration') || 10;
       const silenceThreshold = this.configManager.get('silence_threshold') || 0.01;
 
       await this.audioProcessor.startContinuousRecording(
@@ -311,45 +324,43 @@ export class EmotionalAICompanion {
   private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
     try {
       console.log('Processing user utterance...');
-      
-      // Set AI as talking to prevent interruption during processing
+      this.onProcessingStartCallback?.(); // MODIFIED: Start processing state
       this.audioProcessor.setAITalking(true);
 
-      // Transcribe the audio
       const transcribedText = await this.transcribeAudio(audioBlob);
       
       if (!transcribedText) {
         console.warn('No transcription available, skipping response');
         this.audioProcessor.setAITalking(false);
+        this.onProcessingEndCallback?.(); // MODIFIED: End processing state
         return;
       }
 
       console.log('User said:', transcribedText);
 
-      // Process the audio and generate response
       const interaction = await this.processAudio(audioBlob, transcribedText);
       
       if (interaction) {
         console.log('AI responded:', interaction.ai_response);
       }
 
-      // Re-enable user input detection
       this.audioProcessor.setAITalking(false);
+      this.onProcessingEndCallback?.(); // MODIFIED: End processing state
       console.log('Ready for next user input');
 
     } catch (error) {
       console.error('Error processing utterance:', error);
       this.audioProcessor.setAITalking(false);
+      this.onProcessingEndCallback?.(); // MODIFIED: End processing state on error
     }
   }
 
   private onSpeechStart(): void {
     console.log('User started speaking');
-    // This can be used to update UI state
+    this.onSpeechStartCallback?.(); // MODIFIED: Notify UI that user is speaking
   }
 
   private onSilence(): void {
-    // This can be used to update UI state
-    // Called when silence is detected after speech
+    this.onSpeechEndCallback?.(); // MODIFIED: Notify UI that user has stopped speaking
   }
 }

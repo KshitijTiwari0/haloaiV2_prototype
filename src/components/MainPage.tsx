@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Mic, MicOff, Settings, MessageCircle, LogOut, User } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
 import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
@@ -35,6 +35,12 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsCallActive(true);
       setError(null);
       setSuccess(null);
+
+      // MODIFIED: Set up the callbacks to update the UI
+      companion.setOnSpeechStart(() => setIsUserSpeaking(true));
+      companion.setOnSpeechEnd(() => setIsUserSpeaking(false));
+      companion.setOnProcessingStart(() => setIsProcessing(true));
+      companion.setOnProcessingEnd(() => setIsProcessing(false));
 
       console.log('Starting call...');
       await companion.startCall();
