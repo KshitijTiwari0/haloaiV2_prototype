@@ -3,9 +3,10 @@ import axios from 'axios';
 export class TextToSpeechEngine {
   private elevenLabsApiKey?: string;
   private voiceId: string;
-  private audio: HTMLAudioElement; // Reusable audio element
-  private isPlaying: boolean = false;
   private audioQueue: Blob[] = [];
+  private isPlaying: boolean = false;
+  private audio: HTMLAudioElement;
+  private currentPromise: { resolve: () => void, reject: (reason?: any) => void } | null = null;
 
   constructor(elevenLabsApiKey?: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM") {
     this.elevenLabsApiKey = elevenLabsApiKey;
@@ -15,29 +16,46 @@ export class TextToSpeechEngine {
       this.isPlaying = false;
       this.playNextInQueue();
     };
+    this.audio.onerror = (e) => {
+        this.isPlaying = false;
+        if(this.currentPromise) {
+            this.currentPromise.reject(e);
+            this.currentPromise = null;
+        }
+    }
     console.log(`TextToSpeechEngine initialized with voice_id: ${voiceId}, API key provided: ${!!elevenLabsApiKey}`);
   }
 
-  private async speakWithElevenLabs(text: string): Promise<boolean> {
+  private playNextInQueue() {
+    if (this.audioQueue.length > 0) {
+      this.isPlaying = true;
+      const audioBlob = this.audioQueue.shift()!;
+      const audioUrl = URL.createObjectURL(audioBlob);
+      this.audio.src = audioUrl;
+      this.audio.play();
+    } else {
+      this.isPlaying = false;
+      if (this.currentPromise) {
+        this.currentPromise.resolve();
+        this.currentPromise = null;
+      }
+    }
+  }
+
+  private async speakWithElevenLabs(text: string): Promise<void> {
     try {
-      console.log(`Attempting to use Eleven Labs API with voice_id: ${this.voiceId} for text: ${text.substring(0, 50)}...`);
-      
+      console.log(`Attempting to use Eleven Labs API for text: ${text.substring(0, 50)}...`);
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`;
       const headers = {
         'xi-api-key': this.elevenLabsApiKey!,
         'Content-Type': 'application/json',
         'Accept': 'audio/mpeg'
       };
-
       const data = {
         text: text,
         model_id: "eleven_monolingual_v1",
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5
-        }
+        voice_settings: { stability: 0.5, similarity_boost: 0.5 }
       };
-
       const response = await axios.post(url, data, {
         headers,
         timeout: 20000,
@@ -50,63 +68,55 @@ export class TextToSpeechEngine {
         if (!this.isPlaying) {
           this.playNextInQueue();
         }
-        return true;
       } else {
-        console.error(`Eleven Labs API error: ${response.status}`);
-        return false;
+        throw new Error(`Eleven Labs API error: ${response.status}`);
       }
     } catch (error) {
       console.error('Error with Eleven Labs API:', error);
-      return false;
-    }
-  }
-
-  private playNextInQueue() {
-    if (this.audioQueue.length > 0) {
-      this.isPlaying = true;
-      const audioBlob = this.audioQueue.shift();
-      const audioUrl = URL.createObjectURL(audioBlob!);
-      this.audio.src = audioUrl;
-      this.audio.play();
+      throw error;
     }
   }
 
   private async speakWithWebSpeech(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!('speechSynthesis' in window)) {
-        reject(new Error('Speech synthesis not supported'));
-        return;
+        return reject(new Error('Speech synthesis not supported'));
       }
-
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-
       utterance.onend = () => resolve();
       utterance.onerror = (event) => reject(event.error);
-
       speechSynthesis.speak(utterance);
-      console.log(`Speaking with Web Speech API: ${text}`);
     });
   }
 
-  async speakText(text: string): Promise<void> {
+  public async speakText(text: string): Promise<void> {
     if (!text || text.trim() === "") {
       console.warn('No valid text provided for TTS');
-      throw new Error('No text to speak');
+      return;
     }
-
-    console.log(`Processing text for TTS: ${text}`);
-
-    if (this.elevenLabsApiKey) {
-      if (!(await this.speakWithElevenLabs(text))) {
-        console.warn('Falling back to Web Speech API due to Eleven Labs failure');
-        await this.speakWithWebSpeech(text);
-      }
-    } else {
-      console.warn('No Eleven Labs API key provided, using Web Speech API');
-      await this.speakWithWebSpeech(text);
-    }
+    
+    return new Promise(async (resolve, reject) => {
+        this.currentPromise = { resolve, reject };
+        if (this.elevenLabsApiKey) {
+            try {
+                await this.speakWithElevenLabs(text);
+            } catch (error) {
+                console.warn('Eleven Labs failed, falling back to Web Speech API.');
+                try {
+                    await this.speakWithWebSpeech(text);
+                    resolve();
+                } catch (webSpeechError) {
+                    reject(webSpeechError);
+                }
+            }
+        } else {
+            try {
+                await this.speakWithWebSpeech(text);
+                resolve();
+            } catch (webSpeechError) {
+                reject(webSpeechError);
+            }
+        }
+    });
   }
 }

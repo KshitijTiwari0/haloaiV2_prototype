@@ -78,45 +78,16 @@ export class AudioProcessor {
     }
   }
 
-  async stopRecording(): Promise<Blob | null> {
-    return new Promise((resolve, reject) => {
-      if (!this.mediaRecorder) {
-        reject(new Error('No active recording'));
-        return;
-      }
-
-      this.mediaRecorder.onstop = () => {
-        try {
-          const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-          this.cleanup();
-          resolve(audioBlob);
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      this.mediaRecorder.stop();
-    });
-  }
-
   async startContinuousRecording(
     onUtteranceEnd: (blob: Blob) => void,
     onSpeechStart: () => void,
     onSilence: () => void
   ): Promise<void> {
-    try {
-      this.onUtteranceEndCallback = onUtteranceEnd;
-      this.onSpeechStartCallback = onSpeechStart;
-      this.onSilenceCallback = onSilence;
-
-      await this.startRecording();
-      this.startVAD();
-
-      console.log('Continuous recording started');
-    } catch (error) {
-      console.error('Recording error:', error);
-      throw error;
-    }
+    this.onUtteranceEndCallback = onUtteranceEnd;
+    this.onSpeechStartCallback = onSpeechStart;
+    this.onSilenceCallback = onSilence;
+    await this.startRecording();
+    this.startVAD();
   }
 
   private startVAD(): void {
@@ -141,7 +112,6 @@ export class AudioProcessor {
           if (isSpeech) {
             this.vadState = 'VOICE';
             this.onSpeechStartCallback?.();
-            console.log('Speech detected');
           }
           break;
         case 'VOICE':
@@ -162,11 +132,8 @@ export class AudioProcessor {
     this.onSilenceCallback?.();
     this.vadState = 'SILENT';
     this.silenceFrames = 0;
-
     if (this.currentUtteranceChunks.length > 0) {
       const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
-      console.log('Utterance ended, processing audio blob');
-      
       this.currentUtteranceChunks = [];
       this.onUtteranceEndCallback?.(utteranceBlob);
     }
@@ -174,138 +141,61 @@ export class AudioProcessor {
 
   setAITalking(talking: boolean): void {
     this.isAITalking = talking;
-    console.log(`AI talking state: ${talking}`);
   }
 
   stopContinuousRecording(): void {
-    console.log('Stopping continuous recording');
-    
     if (this.vadInterval) {
       clearInterval(this.vadInterval);
       this.vadInterval = null;
     }
-
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
     }
-
-    this.onUtteranceEndCallback = null;
-    this.onSpeechStartCallback = null;
-    this.onSilenceCallback = null;
-    this.currentUtteranceChunks = [];
-    this.isAITalking = false;
-
     this.cleanup();
   }
 
   private cleanup(): void {
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
     }
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
+    this.stream = null;
+    this.audioContext = null;
     this.analyser = null;
     this.mediaRecorder = null;
   }
 
-  async transcribeAudio(audioBlob: Blob, config: { 
-    openai_api_key?: string, 
-    assemblyai_api_key?: string,
-    transcription_method?: string 
-  } = {}): Promise<string | null> {
-    if (!audioBlob || audioBlob.size === 0) {
-      console.warn('No audio data to transcribe');
-      return null;
+  async transcribeAudio(audioBlob: Blob, config: { assemblyai_api_key?: string }): Promise<string | null> {
+    if (!config.assemblyai_api_key) {
+        console.error('AssemblyAI API key not provided.');
+        return null;
     }
-
-    console.log("Forcing AssemblyAI for transcription.");
-    
-    if (config.assemblyai_api_key) {
-      const result = await this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key);
-      if (result) {
-        return result;
-      }
-    }
-    
-    console.error('AssemblyAI transcription failed or API key not provided.');
-    return null;
+    return await this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key);
   }
 
-  async transcribeWithAssemblyAI(audioBlob: Blob, apiKey?: string): Promise<string | null> {
-    if (!apiKey) {
-      console.warn('AssemblyAI API key not provided');
-      return null;
-    }
-
+  async transcribeWithAssemblyAI(audioBlob: Blob, apiKey: string): Promise<string | null> {
     try {
-      console.log('Attempting AssemblyAI transcription...');
-      
       const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
         method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'content-type': 'application/octet-stream'
-        },
+        headers: { 'authorization': apiKey },
         body: audioBlob
       });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`AssemblyAI upload error: ${uploadResponse.statusText}`);
-      }
-
       const uploadResult = await uploadResponse.json();
-      const audioUrl = uploadResult.upload_url;
-
       const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
         method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          audio_url: audioUrl,
-          language_code: 'en'
-        })
+        headers: { 'authorization': apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ audio_url: uploadResult.upload_url })
       });
-
-      if (!transcriptResponse.ok) {
-        throw new Error(`AssemblyAI transcription error: ${transcriptResponse.statusText}`);
-      }
-
       const transcriptResult = await transcriptResponse.json();
-      const transcriptId = transcriptResult.id;
-
-      let attempts = 0;
-      const maxAttempts = 30;
-      
-      while (attempts < maxAttempts) {
+      let statusResult;
+      while (true) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-          headers: {
-            'authorization': apiKey
-          }
+        const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptResult.id}`, {
+          headers: { 'authorization': apiKey }
         });
-
-        if (!statusResponse.ok) {
-          throw new Error(`AssemblyAI status error: ${statusResponse.statusText}`);
-        }
-
-        const statusResult = await statusResponse.json();
-        
-        if (statusResult.status === 'completed') {
-          return statusResult.text || null;
-        } else if (statusResult.status === 'error') {
-          throw new Error(`AssemblyAI processing error: ${statusResult.error}`);
-        }
-        
-        attempts++;
+        statusResult = await statusResponse.json();
+        if (statusResult.status === 'completed') return statusResult.text || null;
+        if (statusResult.status === 'error') throw new Error(statusResult.error);
       }
-
-      throw new Error('AssemblyAI transcription timeout');
     } catch (error) {
       console.error('AssemblyAI transcription error:', error);
       return null;
