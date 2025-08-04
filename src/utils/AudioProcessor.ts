@@ -6,12 +6,16 @@ export class AudioProcessor {
   private analyser: AnalyserNode | null = null;
   private audioContext: AudioContext | null = null;
   private vadInterval: number | null = null;
-  private isSpeechDetectedInCurrentUtterance: boolean = false;
-  private silenceCounter: number = 0;
   private isAITalking: boolean = false;
   private onUtteranceEndCallback: ((blob: Blob) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
   private onSilenceCallback: (() => void) | null = null;
+
+  // More robust VAD state
+  private vadState: 'SILENT' | 'VOICE' = 'SILENT';
+  private silenceFrames: number = 0;
+  private readonly requiredSilenceFrames = 15; // 1.5 seconds of silence
+  private readonly vadThreshold = 0.02; // Increased threshold
 
   constructor() {
     this.testMicrophoneSetup();
@@ -67,7 +71,7 @@ export class AudioProcessor {
         }
       };
 
-      this.mediaRecorder.start(100); // Collect data every 100ms
+      this.mediaRecorder.start(100);
       console.log('Recording started');
     } catch (error) {
       console.error('Error starting recording:', error);
@@ -99,8 +103,7 @@ export class AudioProcessor {
   async startContinuousRecording(
     onUtteranceEnd: (blob: Blob) => void,
     onSpeechStart: () => void,
-    onSilence: () => void,
-    silenceThreshold: number = 0.01
+    onSilence: () => void
   ): Promise<void> {
     try {
       this.onUtteranceEndCallback = onUtteranceEnd;
@@ -108,7 +111,7 @@ export class AudioProcessor {
       this.onSilenceCallback = onSilence;
 
       await this.startRecording();
-      this.startVAD(silenceThreshold);
+      this.startVAD();
 
       console.log('Continuous recording started');
     } catch (error) {
@@ -117,11 +120,11 @@ export class AudioProcessor {
     }
   }
 
-  private startVAD(silenceThreshold: number): void {
-    const maxSilenceFrames = 20; // ~2 seconds of silence
-
+  private startVAD(): void {
     this.vadInterval = window.setInterval(() => {
-      if (!this.analyser) return;
+      if (!this.analyser || this.isAITalking) {
+        return;
+      }
 
       const bufferLength = this.analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -129,49 +132,43 @@ export class AudioProcessor {
 
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i] * dataArray[i];
+        sum += dataArray[i];
       }
-      const rms = Math.sqrt(sum / bufferLength) / 255;
-      const isSpeechDetected = rms > silenceThreshold;
+      const average = sum / bufferLength;
+      const isSpeech = average > (this.vadThreshold * 255);
 
-      if (this.isAITalking) {
-        if (this.currentUtteranceChunks.length > 0) {
-          this.currentUtteranceChunks = [];
-          this.isSpeechDetectedInCurrentUtterance = false;
-          this.silenceCounter = 0;
-        }
-        return;
-      }
-
-      if (isSpeechDetected) {
-        if (!this.isSpeechDetectedInCurrentUtterance) {
-          this.isSpeechDetectedInCurrentUtterance = true;
-          this.onSpeechStartCallback?.();
-          console.log('Speech started');
-        }
-        this.silenceCounter = 0;
-      } else {
-        if (this.isSpeechDetectedInCurrentUtterance) {
-          this.silenceCounter++;
-          this.onSilenceCallback?.();
-
-          if (this.silenceCounter >= maxSilenceFrames) {
-            this.processUtteranceEnd();
+      switch (this.vadState) {
+        case 'SILENT':
+          if (isSpeech) {
+            this.vadState = 'VOICE';
+            this.onSpeechStartCallback?.();
+            console.log('Speech detected');
           }
-        }
+          break;
+        case 'VOICE':
+          if (!isSpeech) {
+            this.silenceFrames++;
+            if (this.silenceFrames >= this.requiredSilenceFrames) {
+              this.processUtteranceEnd();
+            }
+          } else {
+            this.silenceFrames = 0;
+          }
+          break;
       }
     }, 100);
   }
 
   private processUtteranceEnd(): void {
+    this.onSilenceCallback?.();
+    this.vadState = 'SILENT';
+    this.silenceFrames = 0;
+
     if (this.currentUtteranceChunks.length > 0) {
       const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
       console.log('Utterance ended, processing audio blob');
       
       this.currentUtteranceChunks = [];
-      this.isSpeechDetectedInCurrentUtterance = false;
-      this.silenceCounter = 0;
-
       this.onUtteranceEndCallback?.(utteranceBlob);
     }
   }
@@ -197,8 +194,6 @@ export class AudioProcessor {
     this.onSpeechStartCallback = null;
     this.onSilenceCallback = null;
     this.currentUtteranceChunks = [];
-    this.isSpeechDetectedInCurrentUtterance = false;
-    this.silenceCounter = 0;
     this.isAITalking = false;
 
     this.cleanup();
@@ -440,6 +435,7 @@ export class AudioProcessor {
     }
   }
 
+  // MODIFIED: This method now *only* uses AssemblyAI
   async transcribeAudio(audioBlob: Blob, config: { 
     openai_api_key?: string, 
     assemblyai_api_key?: string,
@@ -450,47 +446,16 @@ export class AudioProcessor {
       return null;
     }
 
-    const method = config.transcription_method || 'auto';
+    console.log("Forcing AssemblyAI for transcription.");
     
-    console.log(`Transcribing audio using method: ${method}`);
-
-    const methods = [
-      {
-        name: 'huggingface',
-        fn: () => this.transcribeWithHuggingFace(audioBlob)
-      },
-      {
-        name: 'assemblyai',
-        fn: () => this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key)
-      },
-      {
-        name: 'openai',
-        fn: () => config.openai_api_key ? this.transcribeWithOpenAI(audioBlob, config.openai_api_key) : null
-      }
-    ];
-
-    if (method !== 'auto') {
-      const specificMethod = methods.find(m => m.name === method);
-      if (specificMethod) {
-        const result = await specificMethod.fn();
-        if (result) return result;
+    if (config.assemblyai_api_key) {
+      const result = await this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key);
+      if (result) {
+        return result;
       }
     }
-
-    for (const methodObj of methods) {
-      try {
-        console.log(`Trying ${methodObj.name} transcription...`);
-        const result = await methodObj.fn();
-        if (result && result.trim()) {
-          console.log(`Successfully transcribed with ${methodObj.name}`);
-          return result.trim();
-        }
-      } catch (error) {
-        console.warn(`${methodObj.name} transcription failed:`, error);
-      }
-    }
-
-    console.error('All transcription methods failed');
+    
+    console.error('AssemblyAI transcription failed or API key not provided.');
     return null;
   }
 }
