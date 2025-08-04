@@ -61,7 +61,6 @@ export class AudioProcessor {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
-          // Also add to current utterance chunks for continuous recording
           if (this.onUtteranceEndCallback) {
             this.currentUtteranceChunks.push(event.data);
           }
@@ -104,15 +103,11 @@ export class AudioProcessor {
     silenceThreshold: number = 0.01
   ): Promise<void> {
     try {
-      // Store callbacks
       this.onUtteranceEndCallback = onUtteranceEnd;
       this.onSpeechStartCallback = onSpeechStart;
       this.onSilenceCallback = onSilence;
 
-      // Initialize recording
       await this.startRecording();
-
-      // Start continuous VAD
       this.startVAD(silenceThreshold);
 
       console.log('Continuous recording started');
@@ -123,7 +118,7 @@ export class AudioProcessor {
   }
 
   private startVAD(silenceThreshold: number): void {
-    const maxSilenceChunks = 20; // ~2 seconds of silence at 100ms intervals
+    const maxSilenceFrames = 20; // ~2 seconds of silence
 
     this.vadInterval = window.setInterval(() => {
       if (!this.analyser) return;
@@ -132,18 +127,14 @@ export class AudioProcessor {
       const dataArray = new Uint8Array(bufferLength);
       this.analyser.getByteFrequencyData(dataArray);
 
-      // Calculate RMS (Root Mean Square) for volume detection
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
         sum += dataArray[i] * dataArray[i];
       }
       const rms = Math.sqrt(sum / bufferLength) / 255;
-
       const isSpeechDetected = rms > silenceThreshold;
 
-      // Don't process user speech while AI is talking
       if (this.isAITalking) {
-        // Clear any accumulated chunks while AI is talking
         if (this.currentUtteranceChunks.length > 0) {
           this.currentUtteranceChunks = [];
           this.isSpeechDetectedInCurrentUtterance = false;
@@ -153,27 +144,23 @@ export class AudioProcessor {
       }
 
       if (isSpeechDetected) {
-        // Speech detected
         if (!this.isSpeechDetectedInCurrentUtterance) {
-          // Start of new utterance
           this.isSpeechDetectedInCurrentUtterance = true;
           this.onSpeechStartCallback?.();
           console.log('Speech started');
         }
         this.silenceCounter = 0;
       } else {
-        // Silence detected
         if (this.isSpeechDetectedInCurrentUtterance) {
           this.silenceCounter++;
           this.onSilenceCallback?.();
 
-          // End of utterance after sufficient silence
-          if (this.silenceCounter >= maxSilenceChunks) {
+          if (this.silenceCounter >= maxSilenceFrames) {
             this.processUtteranceEnd();
           }
         }
       }
-    }, 100); // Check every 100ms
+    }, 100);
   }
 
   private processUtteranceEnd(): void {
@@ -181,12 +168,10 @@ export class AudioProcessor {
       const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
       console.log('Utterance ended, processing audio blob');
       
-      // Reset for next utterance
       this.currentUtteranceChunks = [];
       this.isSpeechDetectedInCurrentUtterance = false;
       this.silenceCounter = 0;
 
-      // Process the utterance
       this.onUtteranceEndCallback?.(utteranceBlob);
     }
   }
@@ -199,18 +184,15 @@ export class AudioProcessor {
   stopContinuousRecording(): void {
     console.log('Stopping continuous recording');
     
-    // Clear VAD interval
     if (this.vadInterval) {
       clearInterval(this.vadInterval);
       this.vadInterval = null;
     }
 
-    // Stop media recorder
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
     }
 
-    // Clear callbacks and state
     this.onUtteranceEndCallback = null;
     this.onSpeechStartCallback = null;
     this.onSilenceCallback = null;
@@ -219,7 +201,6 @@ export class AudioProcessor {
     this.silenceCounter = 0;
     this.isAITalking = false;
 
-    // Cleanup audio resources
     this.cleanup();
   }
 
@@ -229,7 +210,7 @@ export class AudioProcessor {
       
       return new Promise((resolve, reject) => {
         let silenceCounter = 0;
-        const maxSilenceChunks = 20; // ~2 seconds of silence
+        const maxSilenceChunks = 20;
         let hasSpokenContent = false;
 
         const checkSilence = () => {
@@ -239,7 +220,6 @@ export class AudioProcessor {
           const dataArray = new Uint8Array(bufferLength);
           this.analyser.getByteFrequencyData(dataArray);
 
-          // Calculate RMS (Root Mean Square) for volume detection
           let sum = 0;
           for (let i = 0; i < bufferLength; i++) {
             sum += dataArray[i] * dataArray[i];
@@ -253,7 +233,6 @@ export class AudioProcessor {
             silenceCounter++;
           }
 
-          // Stop if we've detected speech and then silence
           if (hasSpokenContent && silenceCounter >= maxSilenceChunks) {
             this.stopRecording().then(resolve).catch(reject);
             return;
@@ -262,10 +241,8 @@ export class AudioProcessor {
           setTimeout(checkSilence, 100);
         };
 
-        // Start silence detection
         setTimeout(checkSilence, 100);
 
-        // Maximum duration timeout
         setTimeout(() => {
           this.stopRecording().then(resolve).catch(reject);
         }, maxDuration * 1000);
@@ -289,7 +266,6 @@ export class AudioProcessor {
     this.mediaRecorder = null;
   }
 
-  // Web Speech API (Free, built into browsers)
   async transcribeWithWebSpeech(audioBlob: Blob): Promise<string | null> {
     return new Promise((resolve) => {
       if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -299,11 +275,9 @@ export class AudioProcessor {
       }
 
       try {
-        // Create audio element to play the recorded audio
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         
-        // Use Web Speech API with live microphone (limitation: can't process recorded audio directly)
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
         
@@ -327,8 +301,6 @@ export class AudioProcessor {
           URL.revokeObjectURL(audioUrl);
         };
 
-        // Note: Web Speech API works with live audio, not recorded blobs
-        // This is a limitation we'll work around
         console.warn('Web Speech API limitation: Cannot process recorded audio directly');
         resolve(null);
       } catch (error) {
@@ -338,7 +310,6 @@ export class AudioProcessor {
     });
   }
 
-  // Hugging Face Inference API (Free with rate limits)
   async transcribeWithHuggingFace(audioBlob: Blob): Promise<string | null> {
     try {
       console.log('Attempting Hugging Face transcription...');
@@ -363,7 +334,6 @@ export class AudioProcessor {
     }
   }
 
-  // AssemblyAI (Free tier available)
   async transcribeWithAssemblyAI(audioBlob: Blob, apiKey?: string): Promise<string | null> {
     if (!apiKey) {
       console.warn('AssemblyAI API key not provided');
@@ -373,7 +343,6 @@ export class AudioProcessor {
     try {
       console.log('Attempting AssemblyAI transcription...');
       
-      // First, upload the audio file
       const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
         method: 'POST',
         headers: {
@@ -390,7 +359,6 @@ export class AudioProcessor {
       const uploadResult = await uploadResponse.json();
       const audioUrl = uploadResult.upload_url;
 
-      // Then, request transcription
       const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
         method: 'POST',
         headers: {
@@ -410,12 +378,11 @@ export class AudioProcessor {
       const transcriptResult = await transcriptResponse.json();
       const transcriptId = transcriptResult.id;
 
-      // Poll for completion
       let attempts = 0;
-      const maxAttempts = 30; // 30 seconds timeout
+      const maxAttempts = 30;
       
       while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
           headers: {
@@ -445,7 +412,6 @@ export class AudioProcessor {
     }
   }
 
-  // OpenAI Whisper API (Paid but most reliable)
   async transcribeWithOpenAI(audioBlob: Blob, apiKey: string): Promise<string | null> {
     try {
       console.log('Attempting OpenAI Whisper transcription...');
@@ -474,7 +440,6 @@ export class AudioProcessor {
     }
   }
 
-  // Main transcription method with fallbacks
   async transcribeAudio(audioBlob: Blob, config: { 
     openai_api_key?: string, 
     assemblyai_api_key?: string,
@@ -489,7 +454,6 @@ export class AudioProcessor {
     
     console.log(`Transcribing audio using method: ${method}`);
 
-    // Try methods in order of preference
     const methods = [
       {
         name: 'huggingface',
@@ -506,7 +470,6 @@ export class AudioProcessor {
     ];
 
     if (method !== 'auto') {
-      // Try specific method first
       const specificMethod = methods.find(m => m.name === method);
       if (specificMethod) {
         const result = await specificMethod.fn();
@@ -514,7 +477,6 @@ export class AudioProcessor {
       }
     }
 
-    // Try all methods as fallbacks
     for (const methodObj of methods) {
       try {
         console.log(`Trying ${methodObj.name} transcription...`);
