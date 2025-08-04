@@ -53,9 +53,6 @@ export class EmotionalAICompanion {
       const transcribedText = await this.transcribeAudio(audioBlob);
       if (!transcribedText) {
         console.warn('Transcription failed or produced no text.');
-        // If transcription fails, we go back to listening
-        this.audioProcessor.setAITalking(false);
-        this.onProcessingEndCallback?.();
         return;
       }
       console.log('User said:', transcribedText);
@@ -65,7 +62,6 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error processing utterance:', error);
     } finally {
-      // This is the key: we ensure that the AI is no longer "talking" ONLY after everything is done.
       this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
       console.log('--- Ready for next user input ---');
@@ -85,8 +81,6 @@ export class EmotionalAICompanion {
       
       if (llmResponse.ai_response) {
         console.log('AI will say:', llmResponse.ai_response);
-        
-        // This is the most critical line: we now `await` the TTS to finish
         await this.ttsEngine.speakText(llmResponse.ai_response);
         console.log('AI finished speaking.');
 
