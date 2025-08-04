@@ -11,11 +11,10 @@ export class AudioProcessor {
   private onSpeechStartCallback: (() => void) | null = null;
   private onSilenceCallback: (() => void) | null = null;
 
-  // More robust VAD state
   private vadState: 'SILENT' | 'VOICE' = 'SILENT';
   private silenceFrames: number = 0;
-  private readonly requiredSilenceFrames = 15; // 1.5 seconds of silence
-  private readonly vadThreshold = 0.02; // Increased threshold
+  private readonly requiredSilenceFrames = 15;
+  private readonly vadThreshold = 0.02;
 
   constructor() {
     this.testMicrophoneSetup();
@@ -199,55 +198,6 @@ export class AudioProcessor {
     this.cleanup();
   }
 
-  async recordWithVAD(maxDuration: number = 10, silenceThreshold: number = 0.01): Promise<Blob | null> {
-    try {
-      await this.startRecording();
-      
-      return new Promise((resolve, reject) => {
-        let silenceCounter = 0;
-        const maxSilenceChunks = 20;
-        let hasSpokenContent = false;
-
-        const checkSilence = () => {
-          if (!this.analyser) return;
-
-          const bufferLength = this.analyser.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
-          this.analyser.getByteFrequencyData(dataArray);
-
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i] * dataArray[i];
-          }
-          const rms = Math.sqrt(sum / bufferLength) / 255;
-
-          if (rms > silenceThreshold) {
-            silenceCounter = 0;
-            hasSpokenContent = true;
-          } else {
-            silenceCounter++;
-          }
-
-          if (hasSpokenContent && silenceCounter >= maxSilenceChunks) {
-            this.stopRecording().then(resolve).catch(reject);
-            return;
-          }
-
-          setTimeout(checkSilence, 100);
-        };
-
-        setTimeout(checkSilence, 100);
-
-        setTimeout(() => {
-          this.stopRecording().then(resolve).catch(reject);
-        }, maxDuration * 1000);
-      });
-    } catch (error) {
-      console.error('Recording error:', error);
-      return null;
-    }
-  }
-
   private cleanup(): void {
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
@@ -261,72 +211,27 @@ export class AudioProcessor {
     this.mediaRecorder = null;
   }
 
-  async transcribeWithWebSpeech(audioBlob: Blob): Promise<string | null> {
-    return new Promise((resolve) => {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        console.warn('Web Speech API not supported');
-        resolve(null);
-        return;
-      }
-
-      try {
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
-
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          URL.revokeObjectURL(audioUrl);
-          resolve(transcript);
-        };
-
-        recognition.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
-          URL.revokeObjectURL(audioUrl);
-          resolve(null);
-        };
-
-        recognition.onend = () => {
-          URL.revokeObjectURL(audioUrl);
-        };
-
-        console.warn('Web Speech API limitation: Cannot process recorded audio directly');
-        resolve(null);
-      } catch (error) {
-        console.error('Web Speech API error:', error);
-        resolve(null);
-      }
-    });
-  }
-
-  async transcribeWithHuggingFace(audioBlob: Blob): Promise<string | null> {
-    try {
-      console.log('Attempting Hugging Face transcription...');
-      
-      const response = await fetch('https://api-inference.huggingface.co/models/openai/whisper-tiny', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'audio/wav',
-        },
-        body: audioBlob
-      });
-
-      if (!response.ok) {
-        throw new Error(`Hugging Face API error: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      return result.text || null;
-    } catch (error) {
-      console.error('Hugging Face transcription error:', error);
+  async transcribeAudio(audioBlob: Blob, config: { 
+    openai_api_key?: string, 
+    assemblyai_api_key?: string,
+    transcription_method?: string 
+  } = {}): Promise<string | null> {
+    if (!audioBlob || audioBlob.size === 0) {
+      console.warn('No audio data to transcribe');
       return null;
     }
+
+    console.log("Forcing AssemblyAI for transcription.");
+    
+    if (config.assemblyai_api_key) {
+      const result = await this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key);
+      if (result) {
+        return result;
+      }
+    }
+    
+    console.error('AssemblyAI transcription failed or API key not provided.');
+    return null;
   }
 
   async transcribeWithAssemblyAI(audioBlob: Blob, apiKey?: string): Promise<string | null> {
@@ -405,57 +310,5 @@ export class AudioProcessor {
       console.error('AssemblyAI transcription error:', error);
       return null;
     }
-  }
-
-  async transcribeWithOpenAI(audioBlob: Blob, apiKey: string): Promise<string | null> {
-    try {
-      console.log('Attempting OpenAI Whisper transcription...');
-      
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.webm');
-      formData.append('model', 'whisper-1');
-
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`OpenAI transcription failed: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      return result.text || null;
-    } catch (error) {
-      console.error('OpenAI transcription error:', error);
-      return null;
-    }
-  }
-
-  // MODIFIED: This method now *only* uses AssemblyAI
-  async transcribeAudio(audioBlob: Blob, config: { 
-    openai_api_key?: string, 
-    assemblyai_api_key?: string,
-    transcription_method?: string 
-  } = {}): Promise<string | null> {
-    if (!audioBlob || audioBlob.size === 0) {
-      console.warn('No audio data to transcribe');
-      return null;
-    }
-
-    console.log("Forcing AssemblyAI for transcription.");
-    
-    if (config.assemblyai_api_key) {
-      const result = await this.transcribeWithAssemblyAI(audioBlob, config.assemblyai_api_key);
-      if (result) {
-        return result;
-      }
-    }
-    
-    console.error('AssemblyAI transcription failed or API key not provided.');
-    return null;
   }
 }

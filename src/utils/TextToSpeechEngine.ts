@@ -3,53 +3,25 @@ import axios from 'axios';
 export class TextToSpeechEngine {
   private elevenLabsApiKey?: string;
   private voiceId: string;
-  private maxChars: number = 5000;
-  private lastApiCall: number = 0;
-  private minDelay: number = 1000;
+  private audio: HTMLAudioElement; // Reusable audio element
+  private isPlaying: boolean = false;
+  private audioQueue: Blob[] = [];
 
   constructor(elevenLabsApiKey?: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM") {
     this.elevenLabsApiKey = elevenLabsApiKey;
     this.voiceId = voiceId;
+    this.audio = new Audio();
+    this.audio.onended = () => {
+      this.isPlaying = false;
+      this.playNextInQueue();
+    };
     console.log(`TextToSpeechEngine initialized with voice_id: ${voiceId}, API key provided: ${!!elevenLabsApiKey}`);
-  }
-
-  private splitText(text: string): string[] {
-    if (text.length <= this.maxChars) {
-      return [text];
-    }
-
-    const chunks: string[] = [];
-    let currentChunk = "";
-    const sentences = text.split('. ');
-
-    for (const sentence of sentences) {
-      if (currentChunk.length + sentence.length + 1 <= this.maxChars) {
-        currentChunk += sentence + '. ';
-      } else {
-        if (currentChunk) {
-          chunks.push(currentChunk.trim());
-        }
-        currentChunk = sentence + '. ';
-      }
-    }
-
-    if (currentChunk) {
-      chunks.push(currentChunk.trim());
-    }
-
-    return chunks;
   }
 
   private async speakWithElevenLabs(text: string): Promise<boolean> {
     try {
       console.log(`Attempting to use Eleven Labs API with voice_id: ${this.voiceId} for text: ${text.substring(0, 50)}...`);
       
-      // Enforce minimum delay to avoid rate limits
-      const elapsed = Date.now() - this.lastApiCall;
-      if (elapsed < this.minDelay) {
-        await new Promise(resolve => setTimeout(resolve, this.minDelay - elapsed));
-      }
-
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`;
       const headers = {
         'xi-api-key': this.elevenLabsApiKey!,
@@ -72,24 +44,12 @@ export class TextToSpeechEngine {
         responseType: 'blob'
       });
 
-      this.lastApiCall = Date.now();
-
       if (response.status === 200) {
-        // Create audio element and play
         const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        
-        await new Promise((resolve, reject) => {
-          audio.onended = () => {
-            URL.revokeObjectURL(audioUrl);
-            resolve(void 0);
-          };
-          audio.onerror = reject;
-          audio.play();
-        });
-
-        console.log('Successfully played audio with Eleven Labs');
+        this.audioQueue.push(audioBlob);
+        if (!this.isPlaying) {
+          this.playNextInQueue();
+        }
         return true;
       } else {
         console.error(`Eleven Labs API error: ${response.status}`);
@@ -98,6 +58,16 @@ export class TextToSpeechEngine {
     } catch (error) {
       console.error('Error with Eleven Labs API:', error);
       return false;
+    }
+  }
+
+  private playNextInQueue() {
+    if (this.audioQueue.length > 0) {
+      this.isPlaying = true;
+      const audioBlob = this.audioQueue.shift();
+      const audioUrl = URL.createObjectURL(audioBlob!);
+      this.audio.src = audioUrl;
+      this.audio.play();
     }
   }
 
@@ -130,18 +100,7 @@ export class TextToSpeechEngine {
     console.log(`Processing text for TTS: ${text}`);
 
     if (this.elevenLabsApiKey) {
-      const chunks = this.splitText(text);
-      let success = true;
-
-      for (let i = 0; i < chunks.length; i++) {
-        console.log(`Speaking chunk ${i + 1}/${chunks.length}: ${chunks[i].substring(0, 50)}...`);
-        if (!(await this.speakWithElevenLabs(chunks[i]))) {
-          success = false;
-          break;
-        }
-      }
-
-      if (!success) {
+      if (!(await this.speakWithElevenLabs(text))) {
         console.warn('Falling back to Web Speech API due to Eleven Labs failure');
         await this.speakWithWebSpeech(text);
       }
