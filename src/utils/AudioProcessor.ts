@@ -87,7 +87,6 @@ export class AudioProcessor {
       
       this.analyser.getFloatTimeDomainData(dataArray);
       
-      // Calculate RMS - the standard way to measure audio energy
       let sumSquares = 0.0;
       for (const amplitude of dataArray) {
         sumSquares += amplitude * amplitude;
