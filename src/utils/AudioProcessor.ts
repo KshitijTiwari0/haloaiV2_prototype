@@ -1,9 +1,17 @@
 export class AudioProcessor {
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
+  private currentUtteranceChunks: Blob[] = [];
   private stream: MediaStream | null = null;
   private analyser: AnalyserNode | null = null;
   private audioContext: AudioContext | null = null;
+  private vadInterval: number | null = null;
+  private isSpeechDetectedInCurrentUtterance: boolean = false;
+  private silenceCounter: number = 0;
+  private isAITalking: boolean = false;
+  private onUtteranceEndCallback: ((blob: Blob) => void) | null = null;
+  private onSpeechStartCallback: (() => void) | null = null;
+  private onSilenceCallback: (() => void) | null = null;
 
   constructor() {
     this.testMicrophoneSetup();
@@ -53,6 +61,10 @@ export class AudioProcessor {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
+          // Also add to current utterance chunks for continuous recording
+          if (this.onUtteranceEndCallback) {
+            this.currentUtteranceChunks.push(event.data);
+          }
         }
       };
 
@@ -83,6 +95,132 @@ export class AudioProcessor {
 
       this.mediaRecorder.stop();
     });
+  }
+
+  async startContinuousRecording(
+    onUtteranceEnd: (blob: Blob) => void,
+    onSpeechStart: () => void,
+    onSilence: () => void,
+    silenceThreshold: number = 0.01
+  ): Promise<void> {
+    try {
+      // Store callbacks
+      this.onUtteranceEndCallback = onUtteranceEnd;
+      this.onSpeechStartCallback = onSpeechStart;
+      this.onSilenceCallback = onSilence;
+
+      // Initialize recording
+      await this.startRecording();
+
+      // Start continuous VAD
+      this.startVAD(silenceThreshold);
+
+      console.log('Continuous recording started');
+    } catch (error) {
+      console.error('Recording error:', error);
+      throw error;
+    }
+  }
+
+  private startVAD(silenceThreshold: number): void {
+    const maxSilenceChunks = 20; // ~2 seconds of silence at 100ms intervals
+
+    this.vadInterval = window.setInterval(() => {
+      if (!this.analyser) return;
+
+      const bufferLength = this.analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      this.analyser.getByteFrequencyData(dataArray);
+
+      // Calculate RMS (Root Mean Square) for volume detection
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i] * dataArray[i];
+      }
+      const rms = Math.sqrt(sum / bufferLength) / 255;
+
+      const isSpeechDetected = rms > silenceThreshold;
+
+      // Don't process user speech while AI is talking
+      if (this.isAITalking) {
+        // Clear any accumulated chunks while AI is talking
+        if (this.currentUtteranceChunks.length > 0) {
+          this.currentUtteranceChunks = [];
+          this.isSpeechDetectedInCurrentUtterance = false;
+          this.silenceCounter = 0;
+        }
+        return;
+      }
+
+      if (isSpeechDetected) {
+        // Speech detected
+        if (!this.isSpeechDetectedInCurrentUtterance) {
+          // Start of new utterance
+          this.isSpeechDetectedInCurrentUtterance = true;
+          this.onSpeechStartCallback?.();
+          console.log('Speech started');
+        }
+        this.silenceCounter = 0;
+      } else {
+        // Silence detected
+        if (this.isSpeechDetectedInCurrentUtterance) {
+          this.silenceCounter++;
+          this.onSilenceCallback?.();
+
+          // End of utterance after sufficient silence
+          if (this.silenceCounter >= maxSilenceChunks) {
+            this.processUtteranceEnd();
+          }
+        }
+      }
+    }, 100); // Check every 100ms
+  }
+
+  private processUtteranceEnd(): void {
+    if (this.currentUtteranceChunks.length > 0) {
+      const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
+      console.log('Utterance ended, processing audio blob');
+      
+      // Reset for next utterance
+      this.currentUtteranceChunks = [];
+      this.isSpeechDetectedInCurrentUtterance = false;
+      this.silenceCounter = 0;
+
+      // Process the utterance
+      this.onUtteranceEndCallback?.(utteranceBlob);
+    }
+  }
+
+  setAITalking(talking: boolean): void {
+    this.isAITalking = talking;
+    console.log(`AI talking state: ${talking}`);
+  }
+
+  stopContinuousRecording(): void {
+    console.log('Stopping continuous recording');
+    
+    // Clear VAD interval
+    if (this.vadInterval) {
+      clearInterval(this.vadInterval);
+      this.vadInterval = null;
+    }
+
+    // Stop media recorder
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+
+    // Clear callbacks and state
+    this.onUtteranceEndCallback = null;
+    this.onSpeechStartCallback = null;
+    this.onSilenceCallback = null;
+    this.currentUtteranceChunks = [];
+    this.isSpeechDetectedInCurrentUtterance = false;
+    this.silenceCounter = 0;
+    this.isAITalking = false;
+
+    // Cleanup audio resources
+    this.cleanup();
   }
 
   async recordWithVAD(maxDuration: number = 10, silenceThreshold: number = 0.01): Promise<Blob | null> {

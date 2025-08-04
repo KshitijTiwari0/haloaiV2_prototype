@@ -13,7 +13,8 @@ interface MainPageProps {
 }
 
 export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, user }) => {
-  const [isRecording, setIsRecording] = useState(false);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentInteraction, setCurrentInteraction] = useState<Interaction | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,52 +28,45 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     }
   };
 
-  const handleRecord = useCallback(async () => {
-    if (isRecording || isProcessing) return;
+  const handleStartCall = useCallback(async () => {
+    if (isCallActive || isProcessing) return;
 
     try {
-      setIsRecording(true);
+      setIsCallActive(true);
       setError(null);
       setSuccess(null);
 
-      console.log('Starting recording...');
-      const audioBlob = await companion.recordWithVAD();
-      
-      if (!audioBlob) {
-        throw new Error('No audio captured. Check your microphone.');
-      }
-
-      setIsRecording(false);
-      setIsProcessing(true);
-
-      console.log('Transcribing audio...');
-      const transcribedText = await companion.transcribeAudio(audioBlob);
-      
-      if (!transcribedText) {
-        throw new Error('Could not transcribe audio. Please try again.');
-      }
-
-      console.log('Transcribed:', transcribedText);
-      setSuccess(`You said: ${transcribedText}`);
-
-      console.log('Processing interaction...');
-      const interaction = await companion.processAudio(audioBlob, transcribedText);
-      
-      if (interaction) {
-        setCurrentInteraction(interaction);
-        console.log('Interaction completed:', interaction);
-      } else {
-        throw new Error('No response generated');
-      }
+      console.log('Starting call...');
+      await companion.startCall();
+      console.log('Call started successfully');
 
     } catch (err) {
-      console.error('Recording/processing error:', err);
+      console.error('Call start error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setIsRecording(false);
-      setIsProcessing(false);
+      setIsCallActive(false);
     }
-  }, [companion, isRecording, isProcessing]);
+  }, [companion, isCallActive, isProcessing]);
+
+  const handleEndCall = useCallback(() => {
+    if (!isCallActive) return;
+
+    try {
+      console.log('Ending call...');
+      companion.stopCall();
+      setIsCallActive(false);
+      setIsUserSpeaking(false);
+      setIsProcessing(false);
+      setError(null);
+      setSuccess(null);
+      console.log('Call ended successfully');
+    } catch (err) {
+      console.error('Call end error:', err);
+      setError(err instanceof Error ? err.message : 'Error ending call');
+    } finally {
+      setIsCallActive(false);
+      setIsUserSpeaking(false);
+    }
+  }, [companion, isCallActive]);
 
   const clearMessages = () => {
     setError(null);
@@ -98,7 +92,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       </div>
 
       <div className="w-full max-w-md text-center">
-        <AIAvatar isRecording={isRecording} isProcessing={isProcessing} />
+        <AIAvatar isRecording={isUserSpeaking} isProcessing={isProcessing} />
         
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">
@@ -106,28 +100,38 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             <span className="text-red-500">.AI</span>
           </h1>
           <p className="text-gray-400">
-            {isRecording ? 'Listening...' : 
-             isProcessing ? 'Processing...' : 
-             'Tap to speak with your AI companion'}
+            {!isCallActive ? 'Tap to start call with your AI companion' :
+             isProcessing ? 'AI is thinking...' :
+             isUserSpeaking ? 'You are speaking...' :
+             'Listening...'}
           </p>
         </div>
 
-        {/* Record Button */}
+        {/* Call Control Buttons */}
         <div className="mb-12">
-          <button
-            onClick={handleRecord}
-            disabled={isRecording || isProcessing}
-            className={`w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 ${
-              isRecording || isProcessing
-                ? 'bg-gray-600 cursor-not-allowed'
-                : 'bg-emerald-500 hover:bg-emerald-600 hover:scale-105 shadow-lg'
-            }`}
-          >
-            {isRecording ? <MicOff /> : <Mic />}
-          </button>
+          {!isCallActive ? (
+            <button
+              onClick={handleStartCall}
+              disabled={isProcessing}
+              className={`w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 ${
+                isProcessing
+                  ? 'bg-gray-600 cursor-not-allowed'
+                  : 'bg-emerald-500 hover:bg-emerald-600 hover:scale-105 shadow-lg'
+              }`}
+            >
+              <Mic />
+            </button>
+          ) : (
+            <button
+              onClick={handleEndCall}
+              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 hover:scale-105 shadow-lg"
+            >
+              <MicOff />
+            </button>
+          )}
         </div>
 
-        {/* Hidden Status Messages - Only show errors */}
+        {/* Status Messages - Only show errors */}
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-500 rounded-lg">
             <p className="text-red-200">❌ {error}</p>
@@ -142,8 +146,18 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
 
         {/* Instructions */}
         <div className="text-center text-gray-400 text-sm">
-          <p className="mb-2">Speak naturally and I'll respond with empathy</p>
-          <p>Your voice and emotions are analyzed in real-time</p>
+          <p className="mb-2">
+            {!isCallActive 
+              ? 'Start a continuous conversation with your AI companion'
+              : 'Speak naturally - the conversation continues until you end the call'
+            }
+          </p>
+          <p>
+            {!isCallActive
+              ? 'Your voice and emotions will be analyzed in real-time'
+              : 'End the call when you\'re ready to finish the conversation'
+            }
+          </p>
         </div>
       </div>
     </div>

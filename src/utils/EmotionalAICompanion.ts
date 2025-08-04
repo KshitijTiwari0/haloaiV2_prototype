@@ -14,6 +14,7 @@ export class EmotionalAICompanion {
   private configManager: ConfigManager;
   private conversationLog: Interaction[] = [];
   private currentUserId: string | null = null;
+  private isCallActive: boolean = false;
 
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -261,5 +262,94 @@ export class EmotionalAICompanion {
 
   getConversationLog(): Interaction[] {
     return [...this.conversationLog];
+  }
+
+  async startCall(): Promise<void> {
+    if (this.isCallActive) {
+      console.warn('Call is already active');
+      return;
+    }
+
+    try {
+      this.isCallActive = true;
+      console.log('Starting continuous call...');
+
+      const maxDuration = this.configManager.get('max_duration') || 10;
+      const silenceThreshold = this.configManager.get('silence_threshold') || 0.01;
+
+      await this.audioProcessor.startContinuousRecording(
+        this.onUtteranceEnd.bind(this),
+        this.onSpeechStart.bind(this),
+        this.onSilence.bind(this),
+        silenceThreshold
+      );
+
+      console.log('Continuous call started successfully');
+    } catch (error) {
+      console.error('Error starting call:', error);
+      this.isCallActive = false;
+      throw error;
+    }
+  }
+
+  stopCall(): void {
+    if (!this.isCallActive) {
+      console.warn('No active call to stop');
+      return;
+    }
+
+    console.log('Stopping continuous call...');
+    this.audioProcessor.stopContinuousRecording();
+    this.isCallActive = false;
+    console.log('Call ended');
+  }
+
+  isCallInProgress(): boolean {
+    return this.isCallActive;
+  }
+
+  private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
+    try {
+      console.log('Processing user utterance...');
+      
+      // Set AI as talking to prevent interruption during processing
+      this.audioProcessor.setAITalking(true);
+
+      // Transcribe the audio
+      const transcribedText = await this.transcribeAudio(audioBlob);
+      
+      if (!transcribedText) {
+        console.warn('No transcription available, skipping response');
+        this.audioProcessor.setAITalking(false);
+        return;
+      }
+
+      console.log('User said:', transcribedText);
+
+      // Process the audio and generate response
+      const interaction = await this.processAudio(audioBlob, transcribedText);
+      
+      if (interaction) {
+        console.log('AI responded:', interaction.ai_response);
+      }
+
+      // Re-enable user input detection
+      this.audioProcessor.setAITalking(false);
+      console.log('Ready for next user input');
+
+    } catch (error) {
+      console.error('Error processing utterance:', error);
+      this.audioProcessor.setAITalking(false);
+    }
+  }
+
+  private onSpeechStart(): void {
+    console.log('User started speaking');
+    // This can be used to update UI state
+  }
+
+  private onSilence(): void {
+    // This can be used to update UI state
+    // Called when silence is detected after speech
   }
 }
