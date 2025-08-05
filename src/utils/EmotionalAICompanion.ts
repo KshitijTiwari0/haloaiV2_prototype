@@ -46,14 +46,16 @@ export class EmotionalAICompanion {
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
 
   private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
+    console.log('AI Companion: Processing utterance - blob type:', audioBlob.type, 'size:', audioBlob.size);
     this.onProcessingStartCallback?.();
+    console.log('AI Companion: isAITalking set to TRUE');
     this.audioProcessor.setAITalking(true);
 
     try {
       const transcribedText = await this.transcribeAudio(audioBlob);
       if (!transcribedText) {
         console.warn('Transcription failed or produced no text.');
-        return; 
+        return; // Return to listening if transcription fails
       }
       console.log('User said:', transcribedText);
 
@@ -62,6 +64,7 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error processing utterance:', error);
     } finally {
+      console.log('AI Companion: isAITalking set to FALSE');
       this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
       console.log('--- Ready for next user input ---');
