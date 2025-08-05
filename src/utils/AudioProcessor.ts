@@ -1,7 +1,6 @@
 export class AudioProcessor {
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
-  private currentUtteranceChunks: Blob[] = [];
   private stream: MediaStream | null = null;
   private analyser: AnalyserNode | null = null;
   private audioContext: AudioContext | null = null;
@@ -13,7 +12,7 @@ export class AudioProcessor {
 
   private vadState: 'SILENT' | 'VOICE' = 'SILENT';
   private silenceFrames: number = 0;
-  private readonly requiredSilenceFrames = 15;
+  private readonly requiredSilenceFrames = 15; // ~1.5 seconds of silence
   private readonly vadThreshold = 0.01;
 
   constructor() {
@@ -35,38 +34,7 @@ export class AudioProcessor {
     }
   }
 
-  async startRecording(): Promise<void> {
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } 
-      });
-
-      this.audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = this.audioContext.createMediaStreamSource(this.stream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 2048;
-      source.connect(this.analyser);
-
-      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm;codecs=opus' });
-      this.audioChunks = [];
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.audioChunks.push(event.data);
-          // LOGIC APPLIED (Rule #2): Only capture chunks when the user is actively speaking.
-          // This implements the "turn detection" principle.
-          if (this.vadState === 'VOICE') {
-            this.currentUtteranceChunks.push(event.data);
-          }
-        }
-      };
-      this.mediaRecorder.start(100);
-      console.log('Recording started');
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      throw error;
-    }
-  }
-
+  // This method now only sets up the stream and VAD, but doesn't start recording.
   async startContinuousRecording(
     onUtteranceEnd: (blob: Blob) => void,
     onSpeechStart: () => void,
@@ -75,7 +43,18 @@ export class AudioProcessor {
     this.onUtteranceEndCallback = onUtteranceEnd;
     this.onSpeechStartCallback = onSpeechStart;
     this.onSilenceCallback = onSilence;
-    await this.startRecording();
+    
+    if (!this.stream) {
+        this.stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } 
+        });
+        this.audioContext = new AudioContext({ sampleRate: 16000 });
+        const source = this.audioContext.createMediaStreamSource(this.stream);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 2048;
+        source.connect(this.analyser);
+    }
+
     this.startVAD();
   }
 
@@ -83,9 +62,6 @@ export class AudioProcessor {
     const dataArray = new Float32Array(this.analyser!.fftSize);
     this.vadInterval = window.setInterval(() => {
       if (!this.analyser || this.isAITalking) {
-        if (this.isAITalking) {
-          console.log('VAD: Paused - AI is talking');
-        }
         return;
       }
       
@@ -98,30 +74,23 @@ export class AudioProcessor {
       const rms = Math.sqrt(sumSquares / dataArray.length);
       const isSpeech = rms > this.vadThreshold;
 
-      if (Math.random() < 0.1) {
-        console.log('VAD:', {
-          rms: rms.toFixed(4), isSpeech, vadState: this.vadState,
-          silenceFrames: this.silenceFrames, requiredSilenceFrames: this.requiredSilenceFrames,
-          isAITalking: this.isAITalking
-        });
-      }
-      
       switch (this.vadState) {
         case 'SILENT':
           if (isSpeech) {
             this.vadState = 'VOICE';
-            // LOGIC APPLIED (Rule #1): Reset the buffer for the new utterance to start clean.
-            this.currentUtteranceChunks = []; 
-            console.log('VAD: Speech detected - starting utterance');
             this.onSpeechStartCallback?.();
+            // **NEW LOGIC**: Start recording only when speech is detected.
+            this.startRecordingForUtterance();
           }
           break;
         case 'VOICE':
           if (!isSpeech) {
             this.silenceFrames++;
             if (this.silenceFrames >= this.requiredSilenceFrames) {
-              console.log('VAD: Silence detected - ending utterance');
-              this.processUtteranceEnd();
+              this.vadState = 'SILENT';
+              this.onSilenceCallback?.();
+              // **NEW LOGIC**: Stop recording when silence is detected.
+              this.stopRecordingForUtterance();
             }
           } else {
             this.silenceFrames = 0;
@@ -131,17 +100,38 @@ export class AudioProcessor {
     }, 100);
   }
 
-  private processUtteranceEnd(): void {
-    console.log('AudioProcessor: processUtteranceEnd triggered!');
-    this.onSilenceCallback?.();
-    this.vadState = 'SILENT';
-    this.silenceFrames = 0;
-    if (this.currentUtteranceChunks.length > 0) {
-      const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
-      console.log('AudioProcessor: Created utterance blob - type:', utteranceBlob.type, 'size:', utteranceBlob.size);
-      this.currentUtteranceChunks = [];
-      this.onUtteranceEndCallback?.(utteranceBlob);
+  // **NEW METHOD**: A dedicated function to start a clean recording for a single utterance.
+  private startRecordingForUtterance(): void {
+    if (this.stream) {
+      this.audioChunks = [];
+      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm;codecs=opus' });
+      
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = () => {
+        if (this.audioChunks.length > 0) {
+          const utteranceBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+          this.onUtteranceEndCallback?.(utteranceBlob);
+          this.audioChunks = [];
+        }
+      };
+
+      this.mediaRecorder.start();
+      console.log('Recording started for new utterance.');
     }
+  }
+
+  // **NEW METHOD**: A dedicated function to stop the recording and trigger the callback.
+  private stopRecordingForUtterance(): void {
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop();
+      console.log('Recording stopped for utterance.');
+    }
+    this.silenceFrames = 0;
   }
 
   setAITalking(talking: boolean): void {
@@ -153,9 +143,7 @@ export class AudioProcessor {
       clearInterval(this.vadInterval);
       this.vadInterval = null;
     }
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-      this.mediaRecorder.stop();
-    }
+    this.stopRecordingForUtterance();
     this.cleanup();
   }
 
@@ -189,10 +177,14 @@ export class AudioProcessor {
       });
       
       if (!uploadResponse.ok) {
-        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+        const errorBody = await uploadResponse.text();
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorBody}`);
       }
       
       const uploadResult = await uploadResponse.json();
+      if (!uploadResult.upload_url) {
+        throw new Error('AssemblyAI upload did not return a URL.');
+      }
       console.log('AssemblyAI: Upload successful, audio_url:', uploadResult.upload_url);
       
       const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
