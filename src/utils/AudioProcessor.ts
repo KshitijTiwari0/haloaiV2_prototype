@@ -46,6 +46,15 @@ export class AudioProcessor {
   private startVAD(): void {
     const dataArray = new Float32Array(this.analyser!.fftSize);
     let currentUtteranceChunks: Blob[] = [];
+    
+    this.mediaRecorder = new MediaRecorder(this.stream!, { mimeType: 'audio/webm;codecs=opus' });
+    this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && this.vadState === 'VOICE') {
+            currentUtteranceChunks.push(event.data);
+        }
+    };
+    this.mediaRecorder.start(100);
+
 
     this.vadInterval = window.setInterval(() => {
       if (!this.analyser || this.isAITalking) {
@@ -66,15 +75,7 @@ export class AudioProcessor {
           if (isSpeech) {
             this.vadState = 'VOICE';
             this.onSpeechStartCallback?.();
-            // Start recording a new utterance
-            currentUtteranceChunks = [];
-            this.mediaRecorder = new MediaRecorder(this.stream!, { mimeType: 'audio/webm;codecs=opus' });
-            this.mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0) {
-                currentUtteranceChunks.push(event.data);
-              }
-            };
-            this.mediaRecorder.start();
+            currentUtteranceChunks = []; // Start collecting new chunks
           }
           break;
         case 'VOICE':
@@ -84,9 +85,6 @@ export class AudioProcessor {
               this.vadState = 'SILENT';
               this.silenceFrames = 0;
               this.onSilenceCallback?.();
-              if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-                this.mediaRecorder.stop();
-              }
               if (currentUtteranceChunks.length > 0) {
                 const utteranceBlob = new Blob(currentUtteranceChunks, { type: 'audio/webm' });
                 this.onUtteranceEndCallback?.(utteranceBlob);
