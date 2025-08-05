@@ -46,7 +46,9 @@ export class EmotionalAICompanion {
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
 
   private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
+    console.log('AI Companion: Processing utterance - blob type:', audioBlob.type, 'size:', audioBlob.size);
     this.onProcessingStartCallback?.();
+    console.log('AI Companion: isAITalking set to TRUE');
     this.audioProcessor.setAITalking(true);
 
     try {
@@ -62,7 +64,7 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error processing utterance:', error);
     } finally {
-      // This now runs only AFTER the AI has finished speaking
+      console.log('AI Companion: isAITalking set to FALSE');
       this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
       console.log('--- Ready for next user input ---');
@@ -82,7 +84,7 @@ export class EmotionalAICompanion {
       
       if (llmResponse.ai_response) {
         console.log('AI will say:', llmResponse.ai_response);
-        await this.ttsEngine.speakText(llmResponse.ai_response); // This now waits correctly
+        await this.ttsEngine.speakText(llmResponse.ai_response);
         console.log('AI finished speaking.');
 
         const interaction: Interaction = {
