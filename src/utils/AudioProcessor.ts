@@ -52,7 +52,8 @@ export class AudioProcessor {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
-          // Only capture chunks when the user is actively speaking
+          // LOGIC APPLIED (Rule #2): Only capture chunks when the user is actively speaking.
+          // This implements the "turn detection" principle.
           if (this.vadState === 'VOICE') {
             this.currentUtteranceChunks.push(event.data);
           }
@@ -97,22 +98,20 @@ export class AudioProcessor {
       const rms = Math.sqrt(sumSquares / dataArray.length);
       const isSpeech = rms > this.vadThreshold;
 
-      // Log VAD state every 10 frames (1 second) to avoid spam
       if (Math.random() < 0.1) {
         console.log('VAD:', {
-          rms: rms.toFixed(4),
-          isSpeech,
-          vadState: this.vadState,
-          silenceFrames: this.silenceFrames,
-          requiredSilenceFrames: this.requiredSilenceFrames,
+          rms: rms.toFixed(4), isSpeech, vadState: this.vadState,
+          silenceFrames: this.silenceFrames, requiredSilenceFrames: this.requiredSilenceFrames,
           isAITalking: this.isAITalking
         });
       }
+      
       switch (this.vadState) {
         case 'SILENT':
           if (isSpeech) {
             this.vadState = 'VOICE';
-            this.currentUtteranceChunks = []; // Reset for the new utterance
+            // LOGIC APPLIED (Rule #1): Reset the buffer for the new utterance to start clean.
+            this.currentUtteranceChunks = []; 
             console.log('VAD: Speech detected - starting utterance');
             this.onSpeechStartCallback?.();
           }
