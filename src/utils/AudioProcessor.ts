@@ -52,7 +52,8 @@ export class AudioProcessor {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
-          if (this.onUtteranceEndCallback) {
+          // Only capture chunks when the user is actively speaking
+          if (this.vadState === 'VOICE') {
             this.currentUtteranceChunks.push(event.data);
           }
         }
@@ -111,6 +112,7 @@ export class AudioProcessor {
         case 'SILENT':
           if (isSpeech) {
             this.vadState = 'VOICE';
+            this.currentUtteranceChunks = []; // Reset for the new utterance
             console.log('VAD: Speech detected - starting utterance');
             this.onSpeechStartCallback?.();
           }
