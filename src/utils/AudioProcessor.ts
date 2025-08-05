@@ -40,40 +40,12 @@ export class AudioProcessor {
       source.connect(this.analyser);
     }
     
-    if (!this.mediaRecorder) {
-        this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm;codecs=opus' });
-        this.mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0 && this.onUtteranceEndCallback) {
-                const audioBlob = new Blob([event.data], { type: 'audio/webm' });
-                this.onUtteranceEndCallback(audioBlob);
-            }
-        };
-    }
-    
     this.startVAD();
   }
 
   private startVAD(): void {
     const dataArray = new Float32Array(this.analyser!.fftSize);
     let currentUtteranceChunks: Blob[] = [];
-
-    const processUtterance = () => {
-        if (currentUtteranceChunks.length > 0) {
-            const utteranceBlob = new Blob(currentUtteranceChunks, { type: 'audio/webm' });
-            this.onUtteranceEndCallback?.(utteranceBlob);
-            currentUtteranceChunks = [];
-        }
-    }
-    
-    this.mediaRecorder!.ondataavailable = (event) => {
-        if(event.data.size > 0) {
-            currentUtteranceChunks.push(event.data);
-        }
-    };
-
-    if (this.mediaRecorder!.state === 'inactive') {
-        this.mediaRecorder!.start(100);
-    }
 
     this.vadInterval = window.setInterval(() => {
       if (!this.analyser || this.isAITalking) {
@@ -94,6 +66,15 @@ export class AudioProcessor {
           if (isSpeech) {
             this.vadState = 'VOICE';
             this.onSpeechStartCallback?.();
+            // Start recording a new utterance
+            currentUtteranceChunks = [];
+            this.mediaRecorder = new MediaRecorder(this.stream!, { mimeType: 'audio/webm;codecs=opus' });
+            this.mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0) {
+                currentUtteranceChunks.push(event.data);
+              }
+            };
+            this.mediaRecorder.start();
           }
           break;
         case 'VOICE':
@@ -103,7 +84,13 @@ export class AudioProcessor {
               this.vadState = 'SILENT';
               this.silenceFrames = 0;
               this.onSilenceCallback?.();
-              processUtterance();
+              if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                this.mediaRecorder.stop();
+              }
+              if (currentUtteranceChunks.length > 0) {
+                const utteranceBlob = new Blob(currentUtteranceChunks, { type: 'audio/webm' });
+                this.onUtteranceEndCallback?.(utteranceBlob);
+              }
             }
           } else {
             this.silenceFrames = 0;
