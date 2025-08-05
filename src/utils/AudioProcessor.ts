@@ -129,7 +129,10 @@ export class AudioProcessor {
     try {
       const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
         method: 'POST',
-        headers: { 'authorization': apiKey },
+        headers: {
+            'authorization': apiKey,
+            'Content-Type': audioBlob.type
+        },
         body: audioBlob
       });
       const uploadResult = await uploadResponse.json();
