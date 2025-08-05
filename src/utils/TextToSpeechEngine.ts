@@ -33,14 +33,18 @@ export class TextToSpeechEngine {
           const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
           const audioUrl = URL.createObjectURL(audioBlob);
           const audio = new Audio(audioUrl);
+          
+          // The promise is only resolved when the audio has finished playing.
           audio.onended = () => {
             URL.revokeObjectURL(audioUrl);
             resolve();
           };
+          
           audio.onerror = (e) => {
             URL.revokeObjectURL(audioUrl);
             reject(e);
           };
+          
           audio.play();
         } else {
           reject(new Error(`Eleven Labs API error: ${response.status}`));

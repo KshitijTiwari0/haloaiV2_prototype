@@ -99,7 +99,6 @@ export class AudioProcessor {
           if (isSpeech) {
             this.vadState = 'VOICE';
             this.onSpeechStartCallback?.();
-            console.log(`Speech detected (RMS: ${rms.toFixed(4)})`);
           }
           break;
         case 'VOICE':
@@ -121,12 +120,9 @@ export class AudioProcessor {
     this.vadState = 'SILENT';
     this.silenceFrames = 0;
     if (this.currentUtteranceChunks.length > 0) {
-      console.log('Utterance ended, processing audio.');
       const utteranceBlob = new Blob(this.currentUtteranceChunks, { type: 'audio/webm' });
       this.currentUtteranceChunks = [];
       this.onUtteranceEndCallback?.(utteranceBlob);
-    } else {
-        console.log('Silence detected, but no audio chunks to process.');
     }
   }
 
