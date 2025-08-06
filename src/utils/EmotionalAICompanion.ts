@@ -19,7 +19,6 @@ export class EmotionalAICompanion {
   private onSpeechEndCallback: (() => void) | null = null;
   private onProcessingStartCallback: (() => void) | null = null;
   private onProcessingEndCallback: (() => void) | null = null;
-  private onAIResponseStreamCallback: ((chunk: string) => void) | null = null;
 
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -45,7 +44,6 @@ export class EmotionalAICompanion {
   public setOnSpeechEnd(callback: () => void) { this.onSpeechEndCallback = callback; }
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
-  public setOnAIResponseStream(callback: (chunk: string) => void) { this.onAIResponseStreamCallback = callback; }
 
   private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
     console.log('AI Companion: Processing utterance - blob type:', audioBlob.type, 'size:', audioBlob.size);
@@ -89,18 +87,15 @@ export class EmotionalAICompanion {
 
       // Consume the stream from the generator
       for await (const result of responseStream) {
-          if (!result.isFinal) {
-              // Pass each chunk to the UI callback
-              this.onAIResponseStreamCallback?.(result.chunk);
-          } else {
-              // Once done, store the final, clean response and mood
+          // We no longer need to yield chunks to the UI
+          if (result.isFinal) {
               fullAIResponse = result.fullResponse;
               finalMood = result.mood;
           }
       }
       
       if (fullAIResponse) {
-        console.log('AI will say:', fullAIResponse);
+        console.log('AI response:', fullAIResponse); // This is where it's logged to the console
         await this.ttsEngine.speakText(fullAIResponse);
         console.log('AI finished speaking.');
 

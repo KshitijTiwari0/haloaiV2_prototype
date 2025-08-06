@@ -15,7 +15,6 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [isCallActive, setIsCallActive] = useState(false);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [aiResponse, setAiResponse] = useState(''); // State to hold the streaming response
   const [error, setError] = useState<string | null>(null);
 
   const handleSignOut = async () => {
@@ -32,22 +31,14 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsCallActive(true);
       setError(null);
 
-      // Setup all UI callbacks
+      // Setup UI callbacks
       companion.setOnSpeechStart(() => setIsUserSpeaking(true));
       companion.setOnSpeechEnd(() => {
           setIsUserSpeaking(false);
-          // When user stops speaking, clear previous response and enter processing state
-          setAiResponse(''); 
           setIsProcessing(true);
       });
       companion.setOnProcessingEnd(() => setIsProcessing(false));
       
-      // Connect the streaming callback to update the UI
-      companion.setOnAIResponseStream((chunk) => {
-          // Append each new chunk to the aiResponse state
-          setAiResponse(prev => prev + chunk);
-      });
-
       console.log('Starting call...');
       await companion.startCall();
       console.log('Call started successfully');
@@ -68,7 +59,6 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsUserSpeaking(false);
       setIsProcessing(false);
       setError(null);
-      setAiResponse(''); // Clear response on call end
       console.log('Call ended successfully');
     } catch (err) {
       console.error('Call end error:', err);
@@ -95,23 +85,22 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       </div>
 
       <div className="w-full max-w-lg text-center">
-        <AIAvatar isRecording={isUserSpeaking} isProcessing={isProcessing} />
+        {/* The avatar will now only change when the user is speaking */}
+        <AIAvatar isRecording={isUserSpeaking} />
         
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">
             <span className="text-white">Halo</span>
             <span className="text-red-500">.AI</span>
           </h1>
+          {/* Static instruction text, no longer shows dynamic status */}
           <p className="text-gray-400">
-            {!isCallActive ? 'Tap to start your conversation' :
-             isProcessing && !aiResponse ? 'AI is thinking...' :
-             isUserSpeaking ? 'You are speaking...' :
-             'Listening...'}
+            {isCallActive ? 'Speak when ready.' : 'Tap to start your conversation'}
           </p>
         </div>
 
         {/* Call Control Button */}
-        <div className="flex justify-center mb-8">
+        <div className="flex justify-center mb-12">
           {!isCallActive ? (
             <button
               onClick={handleStartCall}
@@ -130,12 +119,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
           )}
         </div>
 
-        {/* AI Response Display Area */}
-        <div className="min-h-[6rem] p-4 bg-gray-800/50 rounded-lg text-left text-lg text-gray-200 whitespace-pre-wrap">
-          {aiResponse}
-          {isProcessing && !aiResponse && <span className="animate-pulse">...</span>}
-        </div>
-
+        {/* Error messages are still shown in the UI */}
         {error && (
           <div className="mt-4 p-4 bg-red-900/30 border border-red-500 rounded-lg text-red-200">
             <p>❌ {error}</p>
