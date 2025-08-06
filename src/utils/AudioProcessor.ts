@@ -27,16 +27,10 @@ export class AudioProcessor {
     }
   }
 
-  // This is the new entry point for the companion
   async startContinuousStreaming(
     onTranscriptUpdate: (transcript: { text: string; final: boolean }) => void,
     onSpeechStart: () => void,
-    config: { assemblyai_api_key?: string }
   ): Promise<void> {
-    if (!config.assemblyai_api_key) {
-      console.error('AssemblyAI API key not provided for streaming.');
-      return;
-    }
 
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
@@ -49,15 +43,18 @@ export class AudioProcessor {
 
       this.onSpeechStartCallback?.();
 
-      // 2. Get AssemblyAI WebSocket Token
-      const tokenResponse = await fetch('https://api.assemblyai.com/v2/realtime/token', {
-        method: 'POST',
-        headers: { 'authorization': config.assemblyai_api_key },
-        body: JSON.stringify({ expires_in: 3600 })
+      // 2. Get AssemblyAI WebSocket Token FROM OUR PROXY FUNCTION
+      // This call is now to our own backend, avoiding the CORS issue.
+      const tokenResponse = await fetch('/api/get-assemblyai-token', {
+        method: 'POST', // The function is configured to handle this
       });
-      const { token } = await tokenResponse.json();
+      const { token, error } = await tokenResponse.json();
 
-      // 3. Open WebSocket Connection
+      if (error || !token) {
+        throw new Error(`Could not fetch AssemblyAI token: ${error || 'No token received'}`);
+      }
+
+      // 3. Open WebSocket Connection (this part remains the same)
       this.socket = new WebSocket(`wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${token}`);
       
       this.socket.onmessage = (message) => {
@@ -66,7 +63,6 @@ export class AudioProcessor {
           this.onTranscriptUpdateCallback?.({ text: res.text, final: true });
         } else if (res.message_type === 'PartialTranscript' && res.text) {
           // You can use partial transcripts for a faster UI, but for now we only care about final ones.
-          // console.log('Partial Transcript:', res.text);
         }
       };
 
@@ -110,7 +106,6 @@ export class AudioProcessor {
     return output;
   }
   
-  // This is now simplified to just close connections
   stopContinuousStreaming(): void {
     if (this.socket) {
       this.socket.close(1000, "Call ended by user");
@@ -125,15 +120,14 @@ export class AudioProcessor {
     this.audioContext = null;
   }
   
-  // Kept for compatibility, but the streaming method is now primary
+  // This method is now effectively a fallback and not used by the primary streaming logic.
   async transcribeAudio(audioBlob: Blob, config: { assemblyai_api_key?: string }): Promise<string | null> {
-    // This is a fallback and should not be used in the new streaming logic
-    console.warn("Using fallback transcribeAudio method.");
+    console.warn("Using fallback transcribeAudio method. This should not happen in the streaming flow.");
     if (!config.assemblyai_api_key) {
-        console.error('AssemblyAI API key not provided.');
+        console.error('AssemblyAI API key not provided for fallback transcription.');
         return null;
     }
-    // The original logic for blob upload remains here as a fallback
+    // The original logic for blob upload could be kept here if you need a non-streaming fallback
     return null; 
   }
 }
