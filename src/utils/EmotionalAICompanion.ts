@@ -19,6 +19,7 @@ export class EmotionalAICompanion {
   private onSpeechEndCallback: (() => void) | null = null;
   private onProcessingStartCallback: (() => void) | null = null;
   private onProcessingEndCallback: (() => void) | null = null;
+  private onAIResponseStreamCallback: ((chunk: string) => void) | null = null;
 
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -44,18 +45,20 @@ export class EmotionalAICompanion {
   public setOnSpeechEnd(callback: () => void) { this.onSpeechEndCallback = callback; }
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
+  public setOnAIResponseStream(callback: (chunk: string) => void) { this.onAIResponseStreamCallback = callback; }
 
   private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
     console.log('AI Companion: Processing utterance - blob type:', audioBlob.type, 'size:', audioBlob.size);
     this.onProcessingStartCallback?.();
-    console.log('AI Companion: isAITalking set to TRUE');
     this.audioProcessor.setAITalking(true);
 
     try {
-      const transcribedText = await this.transcribeAudio(audioBlob);
+      const transcribedText = await this.audioProcessor.transcribeAudio(audioBlob, {
+          assemblyai_api_key: this.configManager.get('assemblyai_api_key'),
+      });
       if (!transcribedText) {
         console.warn('Transcription failed or produced no text.');
-        return; // Return to listening if transcription fails
+        return;
       }
       console.log('User said:', transcribedText);
 
@@ -64,7 +67,6 @@ export class EmotionalAICompanion {
     } catch (error) {
       console.error('Error processing utterance:', error);
     } finally {
-      console.log('AI Companion: isAITalking set to FALSE');
       this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
       console.log('--- Ready for next user input ---');
@@ -76,24 +78,39 @@ export class EmotionalAICompanion {
       const emotionResult = await this.emotionDetector.detectEmotion(audioBlob);
       const recentInteractions = await this.getRecentInteractions();
       
-      const llmResponse = await this.responseGenerator.generateResponse(
+      const responseStream = this.responseGenerator.generateResponseStream(
         transcribedText, 
         emotionResult.description, 
         recentInteractions
       );
+
+      let fullAIResponse = "";
+      let finalMood: string | null = null;
+
+      // Consume the stream from the generator
+      for await (const result of responseStream) {
+          if (!result.isFinal) {
+              // Pass each chunk to the UI callback
+              this.onAIResponseStreamCallback?.(result.chunk);
+          } else {
+              // Once done, store the final, clean response and mood
+              fullAIResponse = result.fullResponse;
+              finalMood = result.mood;
+          }
+      }
       
-      if (llmResponse.ai_response) {
-        console.log('AI will say:', llmResponse.ai_response);
-        await this.ttsEngine.speakText(llmResponse.ai_response);
+      if (fullAIResponse) {
+        console.log('AI will say:', fullAIResponse);
+        await this.ttsEngine.speakText(fullAIResponse);
         console.log('AI finished speaking.');
 
         const interaction: Interaction = {
             timestamp: new Date().toISOString(),
             user_input: transcribedText,
             feature_description: emotionResult.description,
-            ai_response: llmResponse.ai_response,
+            ai_response: fullAIResponse,
             response_time: (Date.now() - startTime) / 1000,
-            user_mood: llmResponse.user_mood
+            user_mood: finalMood || 'neutral'
         };
         await this.saveInteraction(interaction);
       } else {
@@ -117,13 +134,6 @@ export class EmotionalAICompanion {
     this.isCallActive = false;
     console.log('Call ended.');
     this.audioProcessor.stopContinuousRecording();
-  }
-  
-  private async transcribeAudio(audioBlob: Blob): Promise<string | null> {
-    const config = {
-      assemblyai_api_key: this.configManager.get('assemblyai_api_key'),
-    };
-    return await this.audioProcessor.transcribeAudio(audioBlob, config);
   }
 
   private async saveInteraction(interaction: Interaction): Promise<void> {
