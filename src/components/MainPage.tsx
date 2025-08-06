@@ -31,12 +31,10 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsCallActive(true);
       setError(null);
 
-      // Setup UI callbacks
+      // Setup UI callbacks for avatar state
       companion.setOnSpeechStart(() => setIsUserSpeaking(true));
-      companion.setOnSpeechEnd(() => {
-          setIsUserSpeaking(false);
-          setIsProcessing(true);
-      });
+      companion.setOnSpeechEnd(() => setIsUserSpeaking(false)); // This might be less frequent now
+      companion.setOnProcessingStart(() => setIsProcessing(true));
       companion.setOnProcessingEnd(() => setIsProcessing(false));
       
       console.log('Starting call...');
@@ -85,15 +83,14 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       </div>
 
       <div className="w-full max-w-lg text-center">
-        {/* The avatar will now only change when the user is speaking */}
-        <AIAvatar isRecording={isUserSpeaking} />
+        {/* Avatar animation still reflects speaking state */}
+        <AIAvatar isRecording={isUserSpeaking} isProcessing={isProcessing} />
         
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">
             <span className="text-white">Halo</span>
             <span className="text-red-500">.AI</span>
           </h1>
-          {/* Static instruction text, no longer shows dynamic status */}
           <p className="text-gray-400">
             {isCallActive ? 'Speak when ready.' : 'Tap to start your conversation'}
           </p>
@@ -119,7 +116,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
           )}
         </div>
 
-        {/* Error messages are still shown in the UI */}
+        {/* Error messages are still shown */}
         {error && (
           <div className="mt-4 p-4 bg-red-900/30 border border-red-500 rounded-lg text-red-200">
             <p>❌ {error}</p>

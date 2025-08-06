@@ -45,49 +45,41 @@ export class EmotionalAICompanion {
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
 
-  private async onUtteranceEnd(audioBlob: Blob): Promise<void> {
-    console.log('AI Companion: Processing utterance - blob type:', audioBlob.type, 'size:', audioBlob.size);
+  // This is the new core logic that gets triggered by the live transcript
+  private async onTranscriptUpdate(transcript: { text: string; final: boolean }): Promise<void> {
+    if (!transcript.final || !transcript.text) return;
+
+    console.log('Final User Transcript:', transcript.text);
+    
     this.onProcessingStartCallback?.();
-    this.audioProcessor.setAITalking(true);
-
+    
     try {
-      const transcribedText = await this.audioProcessor.transcribeAudio(audioBlob, {
-          assemblyai_api_key: this.configManager.get('assemblyai_api_key'),
-      });
-      if (!transcribedText) {
-        console.warn('Transcription failed or produced no text.');
-        return;
-      }
-      console.log('User said:', transcribedText);
+      // Since we don't have a final audio blob, we'll skip emotion detection for this stream.
+      // A more advanced implementation could analyze audio chunks, but this is a good start.
+      const fakeEmotionResult = { description: "Streaming audio, emotion not analyzed." };
 
-      await this.processAndRespond(audioBlob, transcribedText);
-      
+      await this.processAndRespond(transcript.text, fakeEmotionResult.description);
     } catch (error) {
-      console.error('Error processing utterance:', error);
+      console.error('Error processing transcript:', error);
     } finally {
-      this.audioProcessor.setAITalking(false);
       this.onProcessingEndCallback?.();
-      console.log('--- Ready for next user input ---');
     }
   }
   
-  private async processAndRespond(audioBlob: Blob, transcribedText: string): Promise<void> {
+  private async processAndRespond(transcribedText: string, featureDescription: string): Promise<void> {
       const startTime = Date.now();
-      const emotionResult = await this.emotionDetector.detectEmotion(audioBlob);
       const recentInteractions = await this.getRecentInteractions();
       
       const responseStream = this.responseGenerator.generateResponseStream(
         transcribedText, 
-        emotionResult.description, 
+        featureDescription, 
         recentInteractions
       );
 
       let fullAIResponse = "";
       let finalMood: string | null = null;
 
-      // Consume the stream from the generator
       for await (const result of responseStream) {
-          // We no longer need to yield chunks to the UI
           if (result.isFinal) {
               fullAIResponse = result.fullResponse;
               finalMood = result.mood;
@@ -95,14 +87,14 @@ export class EmotionalAICompanion {
       }
       
       if (fullAIResponse) {
-        console.log('AI response:', fullAIResponse); // This is where it's logged to the console
+        console.log('AI response:', fullAIResponse);
         await this.ttsEngine.speakText(fullAIResponse);
         console.log('AI finished speaking.');
 
         const interaction: Interaction = {
             timestamp: new Date().toISOString(),
             user_input: transcribedText,
-            feature_description: emotionResult.description,
+            feature_description: featureDescription,
             ai_response: fullAIResponse,
             response_time: (Date.now() - startTime) / 1000,
             user_mood: finalMood || 'neutral'
@@ -117,10 +109,11 @@ export class EmotionalAICompanion {
     if (this.isCallActive) return;
     this.isCallActive = true;
     console.log('Call started.');
-    await this.audioProcessor.startContinuousRecording(
-      this.onUtteranceEnd.bind(this),
+    // Use the new streaming method
+    await this.audioProcessor.startContinuousStreaming(
+      this.onTranscriptUpdate.bind(this),
       () => this.onSpeechStartCallback?.(),
-      () => this.onSpeechEndCallback?.()
+      { assemblyai_api_key: this.configManager.get('assemblyai_api_key') }
     );
   }
 
@@ -128,7 +121,7 @@ export class EmotionalAICompanion {
     if (!this.isCallActive) return;
     this.isCallActive = false;
     console.log('Call ended.');
-    this.audioProcessor.stopContinuousRecording();
+    this.audioProcessor.stopContinuousStreaming();
   }
 
   private async saveInteraction(interaction: Interaction): Promise<void> {
