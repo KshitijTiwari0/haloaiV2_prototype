@@ -3,9 +3,6 @@ export class AudioProcessor {
   private audioContext: AudioContext | null = null;
   private socket: WebSocket | null = null;
   private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean }) => void) | null = null;
-
-  // Simplified callbacks for the companion
-  private onUtteranceEndCallback: ((blob: Blob) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
 
   constructor() {
@@ -31,38 +28,37 @@ export class AudioProcessor {
     onTranscriptUpdate: (transcript: { text: string; final: boolean }) => void,
     onSpeechStart: () => void,
   ): Promise<void> {
-
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
 
     try {
-      // 1. Get Microphone Stream
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
       });
 
       this.onSpeechStartCallback?.();
 
-      // 2. Get AssemblyAI WebSocket Token FROM OUR PROXY FUNCTION
-      // This call is now to our own backend, avoiding the CORS issue.
       const tokenResponse = await fetch('/api/get-assemblyai-token', {
-        method: 'POST', // The function is configured to handle this
+        method: 'POST',
       });
-      const { token, error } = await tokenResponse.json();
 
-      if (error || !token) {
-        throw new Error(`Could not fetch AssemblyAI token: ${error || 'No token received'}`);
+      if (!tokenResponse.ok) {
+          const errorData = await tokenResponse.json();
+          throw new Error(errorData.error || `Failed to fetch token with status: ${tokenResponse.status}`);
+      }
+      
+      const { token } = await tokenResponse.json();
+
+      if (!token) {
+        throw new Error('Could not fetch AssemblyAI token: No token received');
       }
 
-      // 3. Open WebSocket Connection (this part remains the same)
       this.socket = new WebSocket(`wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${token}`);
       
       this.socket.onmessage = (message) => {
         const res = JSON.parse(message.data);
         if (res.message_type === 'FinalTranscript' && res.text) {
           this.onTranscriptUpdateCallback?.({ text: res.text, final: true });
-        } else if (res.message_type === 'PartialTranscript' && res.text) {
-          // You can use partial transcripts for a faster UI, but for now we only care about final ones.
         }
       };
 
@@ -74,7 +70,6 @@ export class AudioProcessor {
       };
 
       this.socket.onopen = () => {
-        // 4. Start Streaming Audio
         this.audioContext = new AudioContext({ sampleRate: 16000 });
         const source = this.audioContext.createMediaStreamSource(this.stream!);
         const processor = this.audioContext.createScriptProcessor(1024, 1, 1);
@@ -96,7 +91,6 @@ export class AudioProcessor {
     }
   }
   
-  // Helper to convert audio to the format AssemblyAI expects
   private floatTo16BitPCM(input: Float32Array): Int16Array {
     const output = new Int16Array(input.length);
     for (let i = 0; i < input.length; i++) {
@@ -116,18 +110,9 @@ export class AudioProcessor {
   private cleanup(): void {
     this.stream?.getTracks().forEach(track => track.stop());
     this.stream = null;
-    this.audioContext?.close();
-    this.audioContext = null;
-  }
-  
-  // This method is now effectively a fallback and not used by the primary streaming logic.
-  async transcribeAudio(audioBlob: Blob, config: { assemblyai_api_key?: string }): Promise<string | null> {
-    console.warn("Using fallback transcribeAudio method. This should not happen in the streaming flow.");
-    if (!config.assemblyai_api_key) {
-        console.error('AssemblyAI API key not provided for fallback transcription.');
-        return null;
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close();
     }
-    // The original logic for blob upload could be kept here if you need a non-streaming fallback
-    return null; 
+    this.audioContext = null;
   }
 }

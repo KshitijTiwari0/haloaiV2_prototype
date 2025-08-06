@@ -45,19 +45,13 @@ export class EmotionalAICompanion {
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
 
-  // This is the new core logic that gets triggered by the live transcript
   private async onTranscriptUpdate(transcript: { text: string; final: boolean }): Promise<void> {
     if (!transcript.final || !transcript.text) return;
-
     console.log('Final User Transcript:', transcript.text);
-    
     this.onProcessingStartCallback?.();
     
     try {
-      // Since we don't have a final audio blob, we'll skip emotion detection for this stream.
-      // A more advanced implementation could analyze audio chunks, but this is a good start.
       const fakeEmotionResult = { description: "Streaming audio, emotion not analyzed." };
-
       await this.processAndRespond(transcript.text, fakeEmotionResult.description);
     } catch (error) {
       console.error('Error processing transcript:', error);
@@ -109,11 +103,9 @@ export class EmotionalAICompanion {
     if (this.isCallActive) return;
     this.isCallActive = true;
     console.log('Call started.');
-    // Use the new streaming method
     await this.audioProcessor.startContinuousStreaming(
       this.onTranscriptUpdate.bind(this),
       () => this.onSpeechStartCallback?.(),
-      { assemblyai_api_key: this.configManager.get('assemblyai_api_key') }
     );
   }
 
