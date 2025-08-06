@@ -1,7 +1,7 @@
-import type { Handler } from "@netlify/functions";
+import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 
-const handler: Handler = async (event, context) => {
-  // CORRECTED: Access the variable without the VITE_ prefix.
+const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+  // CORRECTED: The function environment uses variables without the VITE_ prefix.
   const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 
   if (event.httpMethod !== 'POST') {

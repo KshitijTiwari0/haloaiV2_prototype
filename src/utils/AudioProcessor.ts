@@ -26,7 +26,7 @@ export class AudioProcessor {
 
   async startContinuousStreaming(
     onTranscriptUpdate: (transcript: { text: string; final: boolean }) => void,
-    onSpeechStart: () => void,
+    onSpeechStart: () => void
   ): Promise<void> {
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
@@ -43,8 +43,8 @@ export class AudioProcessor {
       });
 
       if (!tokenResponse.ok) {
-          const errorData = await tokenResponse.json();
-          throw new Error(errorData.error || `Failed to fetch token with status: ${tokenResponse.status}`);
+        const errorData = await tokenResponse.json().catch(() => ({ error: "Failed to parse error response." }));
+        throw new Error(errorData.error || `Token request failed with status: ${tokenResponse.status}`);
       }
       
       const { token } = await tokenResponse.json();

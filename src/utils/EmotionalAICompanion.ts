@@ -105,7 +105,7 @@ export class EmotionalAICompanion {
     console.log('Call started.');
     await this.audioProcessor.startContinuousStreaming(
       this.onTranscriptUpdate.bind(this),
-      () => this.onSpeechStartCallback?.(),
+      () => this.onSpeechStartCallback?.()
     );
   }
 
