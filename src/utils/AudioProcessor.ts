@@ -1,27 +1,95 @@
 export class AudioProcessor {
-  private stream: MediaStream | null = null;
-  private audioContext: AudioContext | null = null;
-  private socket: WebSocket | null = null;
+  private recognition: any = null;
+  private isListening: boolean = false;
   private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean }) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
 
   constructor() {
-    this.testMicrophoneSetup();
+    this.initializeSpeechRecognition();
   }
 
-  private async testMicrophoneSetup(): Promise<boolean> {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter(device => device.kind === 'audioinput');
-      if (audioInputs.length === 0) {
-        console.error('No microphone devices found');
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.error('Microphone setup error:', error);
-      return false;
+  private initializeSpeechRecognition(): void {
+    // Check if speech recognition is available
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      console.error('Speech Recognition not supported in this browser');
+      return;
     }
+
+    this.recognition = new SpeechRecognition();
+    this.recognition.continuous = true;
+    this.recognition.interimResults = true;
+    this.recognition.lang = 'en-US';
+
+    this.recognition.onstart = () => {
+      console.log('Speech recognition started');
+      this.isListening = true;
+      this.onSpeechStartCallback?.();
+    };
+
+    this.recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // Send interim results
+      if (interimTranscript) {
+        this.onTranscriptUpdateCallback?.({ 
+          text: interimTranscript, 
+          final: false 
+        });
+      }
+
+      // Send final results
+      if (finalTranscript) {
+        console.log('Final transcript:', finalTranscript);
+        this.onTranscriptUpdateCallback?.({ 
+          text: finalTranscript, 
+          final: true 
+        });
+      }
+    };
+
+    this.recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      
+      if (event.error === 'not-allowed') {
+        console.error('Microphone access denied');
+      } else if (event.error === 'no-speech') {
+        console.warn('No speech detected, restarting...');
+        // Restart recognition after a short delay
+        setTimeout(() => {
+          if (this.isListening) {
+            this.recognition.start();
+          }
+        }, 1000);
+      }
+    };
+
+    this.recognition.onend = () => {
+      console.log('Speech recognition ended');
+      
+      // Auto-restart if we're still supposed to be listening
+      if (this.isListening) {
+        setTimeout(() => {
+          try {
+            this.recognition.start();
+          } catch (error) {
+            console.error('Error restarting recognition:', error);
+          }
+        }, 100);
+      }
+    };
   }
 
   async startContinuousStreaming(
@@ -31,88 +99,31 @@ export class AudioProcessor {
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
 
+    if (!this.recognition) {
+      throw new Error('Speech recognition not available');
+    }
+
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
-      });
-
-      this.onSpeechStartCallback?.();
-
-      const tokenResponse = await fetch('/api/get-assemblyai-token', {
-        method: 'POST',
-      });
-
-      if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json().catch(() => ({ error: "Failed to parse error response." }));
-        throw new Error(errorData.error || `Token request failed with status: ${tokenResponse.status}`);
-      }
-      
-      const { token } = await tokenResponse.json();
-
-      if (!token) {
-        throw new Error('Could not fetch AssemblyAI token: No token received');
-      }
-
-      this.socket = new WebSocket(`wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${token}`);
-      
-      this.socket.onmessage = (message) => {
-        const res = JSON.parse(message.data);
-        if (res.message_type === 'FinalTranscript' && res.text) {
-          this.onTranscriptUpdateCallback?.({ text: res.text, final: true });
-        }
-      };
-
-      this.socket.onerror = (event) => console.error('WebSocket Error:', event);
-      
-      this.socket.onclose = (event) => {
-        console.log('WebSocket Closed:', event.code, event.reason);
-        this.socket = null;
-      };
-
-      this.socket.onopen = () => {
-        this.audioContext = new AudioContext({ sampleRate: 16000 });
-        const source = this.audioContext.createMediaStreamSource(this.stream!);
-        const processor = this.audioContext.createScriptProcessor(1024, 1, 1);
-        
-        processor.onaudioprocess = (e) => {
-          if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const downsampledBuffer = this.floatTo16BitPCM(inputData);
-            this.socket.send(downsampledBuffer);
-          }
-        };
-
-        source.connect(processor);
-        processor.connect(this.audioContext.destination);
-      };
-
+      this.isListening = true;
+      this.recognition.start();
+      console.log('Started browser speech recognition');
     } catch (error) {
-      console.error('Error starting continuous streaming:', error);
+      console.error('Error starting speech recognition:', error);
+      throw new Error('Failed to start speech recognition');
     }
-  }
-  
-  private floatTo16BitPCM(input: Float32Array): Int16Array {
-    const output = new Int16Array(input.length);
-    for (let i = 0; i < input.length; i++) {
-      const s = Math.max(-1, Math.min(1, input[i]));
-      output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    return output;
-  }
-  
-  stopContinuousStreaming(): void {
-    if (this.socket) {
-      this.socket.close(1000, "Call ended by user");
-    }
-    this.cleanup();
   }
 
-  private cleanup(): void {
-    this.stream?.getTracks().forEach(track => track.stop());
-    this.stream = null;
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close();
+  stopContinuousStreaming(): void {
+    console.log('Stopping speech recognition...');
+    
+    this.isListening = false;
+    
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch (error) {
+        console.error('Error stopping recognition:', error);
+      }
     }
-    this.audioContext = null;
   }
 }
