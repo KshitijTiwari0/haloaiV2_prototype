@@ -29,6 +29,7 @@ export class EmotionalAICompanion {
       configManager.get('eleven_labs_api_key'),
       configManager.get('voice_id') || "21m00Tcm4TlvDq8ikWAM"
     );
+    this.ttsEngine.setAudioProcessor(this.audioProcessor);
     this.initializeUser();
   }
 

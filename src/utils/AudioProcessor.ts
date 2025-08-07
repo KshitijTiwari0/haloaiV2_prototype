@@ -113,6 +113,28 @@ export class AudioProcessor {
     }
   }
 
+  pauseRecording(): void {
+    console.log('Pausing speech recognition...');
+    if (this.recognition && this.isListening) {
+      try {
+        this.recognition.stop();
+      } catch (error) {
+        console.error('Error pausing recognition:', error);
+      }
+    }
+  }
+
+  resumeRecording(): void {
+    console.log('Resuming speech recognition...');
+    if (this.recognition && this.isListening) {
+      try {
+        this.recognition.start();
+      } catch (error) {
+        console.error('Error resuming recognition:', error);
+      }
+    }
+  }
+
   stopContinuousStreaming(): void {
     console.log('Stopping speech recognition...');
     
