@@ -28,10 +28,8 @@ export class TextToSpeechEngine {
 
     console.log(`Processing text for TTS: ${text}`);
 
-    // Pause audio recording during TTS to prevent feedback
-    let wasRecording = false;
-    if (pauseRecording && this.audioProcessor) {
-      wasRecording = true;
+    // Always pause recording during TTS to prevent feedback
+    if (this.audioProcessor) {
       this.audioProcessor.pauseRecording();
     }
 
@@ -57,13 +55,21 @@ export class TextToSpeechEngine {
         await this.speakWithWebSpeech(text);
       }
     } finally {
-      // Resume audio recording after TTS
-      if (pauseRecording && this.audioProcessor && wasRecording) {
-        // Add small delay to ensure audio has finished playing
-        setTimeout(() => {
-          this.audioProcessor?.resumeRecording();
-        }, 500);
-      }
+      // Resume recording with longer delay on mobile
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const delay = isMobile ? 2000 : 1000; // 2 seconds on mobile, 1 second on desktop
+      
+      setTimeout(() => {
+        if (this.audioProcessor) {
+          this.audioProcessor.resumeRecording();
+          // On mobile, manually restart recognition
+          if (isMobile) {
+            setTimeout(() => {
+              (this.audioProcessor as any).restartRecognition?.();
+            }, 500);
+          }
+        }
+      }, delay);
     }
   }
 

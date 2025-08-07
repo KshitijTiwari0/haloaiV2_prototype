@@ -1,15 +1,22 @@
 export class AudioProcessor {
   private recognition: any = null;
   private isListening: boolean = false;
+  private isPaused: boolean = false;
   private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean }) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
+  private lastTranscript: string = '';
+  private transcriptTimeout: number | null = null;
+  private isProcessing: boolean = false;
+
+  // Mobile detection
+  private isMobile: boolean = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
   constructor() {
     this.initializeSpeechRecognition();
+    console.log('AudioProcessor initialized for:', this.isMobile ? 'Mobile' : 'Desktop');
   }
 
   private initializeSpeechRecognition(): void {
-    // Check if speech recognition is available
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
@@ -18,9 +25,17 @@ export class AudioProcessor {
     }
 
     this.recognition = new SpeechRecognition();
-    this.recognition.continuous = true;
-    this.recognition.interimResults = true;
+    
+    // Mobile-optimized settings
+    this.recognition.continuous = !this.isMobile; // Less continuous on mobile
+    this.recognition.interimResults = !this.isMobile; // Disable interim on mobile
     this.recognition.lang = 'en-US';
+    this.recognition.maxAlternatives = 1;
+
+    // Mobile-specific settings
+    if (this.isMobile) {
+      this.recognition.serviceURI = null; // Use default
+    }
 
     this.recognition.onstart = () => {
       console.log('Speech recognition started');
@@ -29,34 +44,44 @@ export class AudioProcessor {
     };
 
     this.recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
+      if (this.isPaused || this.isProcessing) {
+        console.log('Recognition paused or processing, ignoring result');
+        return;
+      }
 
+      let finalTranscript = '';
+      
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
+        const transcript = event.results[i][0].transcript.trim();
         
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
+        if (event.results[i].isFinal && transcript) {
+          finalTranscript = transcript;
+          break; // Only take the first final result
         }
       }
 
-      // Send interim results
-      if (interimTranscript) {
-        this.onTranscriptUpdateCallback?.({ 
-          text: interimTranscript, 
-          final: false 
-        });
-      }
+      if (finalTranscript && finalTranscript !== this.lastTranscript) {
+        console.log('New final transcript:', finalTranscript);
+        this.lastTranscript = finalTranscript;
+        this.isProcessing = true;
+        
+        // Clear any existing timeout
+        if (this.transcriptTimeout) {
+          clearTimeout(this.transcriptTimeout);
+        }
 
-      // Send final results
-      if (finalTranscript) {
-        console.log('Final transcript:', finalTranscript);
+        // Send transcript and pause recognition
+        this.pauseRecording();
         this.onTranscriptUpdateCallback?.({ 
           text: finalTranscript, 
           final: true 
         });
+
+        // Reset processing flag after a delay
+        this.transcriptTimeout = setTimeout(() => {
+          this.isProcessing = false;
+          this.lastTranscript = '';
+        }, 3000) as unknown as number;
       }
     };
 
@@ -65,12 +90,15 @@ export class AudioProcessor {
       
       if (event.error === 'not-allowed') {
         console.error('Microphone access denied');
-      } else if (event.error === 'no-speech') {
+        return;
+      }
+
+      // Don't auto-restart on mobile errors
+      if (!this.isMobile && event.error === 'no-speech') {
         console.warn('No speech detected, restarting...');
-        // Restart recognition after a short delay
         setTimeout(() => {
-          if (this.isListening) {
-            this.recognition.start();
+          if (this.isListening && !this.isPaused) {
+            this.startRecognition();
           }
         }, 1000);
       }
@@ -79,17 +107,23 @@ export class AudioProcessor {
     this.recognition.onend = () => {
       console.log('Speech recognition ended');
       
-      // Auto-restart if we're still supposed to be listening
-      if (this.isListening) {
+      // Only auto-restart on desktop and if not paused
+      if (!this.isMobile && this.isListening && !this.isPaused && !this.isProcessing) {
         setTimeout(() => {
-          try {
-            this.recognition.start();
-          } catch (error) {
-            console.error('Error restarting recognition:', error);
-          }
+          this.startRecognition();
         }, 100);
       }
     };
+  }
+
+  private startRecognition(): void {
+    if (!this.recognition || this.isPaused || this.isProcessing) return;
+
+    try {
+      this.recognition.start();
+    } catch (error) {
+      console.error('Error starting recognition:', error);
+    }
   }
 
   async startContinuousStreaming(
@@ -105,8 +139,12 @@ export class AudioProcessor {
 
     try {
       this.isListening = true;
-      this.recognition.start();
-      console.log('Started browser speech recognition');
+      this.isPaused = false;
+      this.isProcessing = false;
+      this.lastTranscript = '';
+      
+      this.startRecognition();
+      console.log('Started speech recognition for:', this.isMobile ? 'Mobile' : 'Desktop');
     } catch (error) {
       console.error('Error starting speech recognition:', error);
       throw new Error('Failed to start speech recognition');
@@ -115,7 +153,9 @@ export class AudioProcessor {
 
   pauseRecording(): void {
     console.log('Pausing speech recognition...');
-    if (this.recognition && this.isListening) {
+    this.isPaused = true;
+    
+    if (this.recognition) {
       try {
         this.recognition.stop();
       } catch (error) {
@@ -126,12 +166,25 @@ export class AudioProcessor {
 
   resumeRecording(): void {
     console.log('Resuming speech recognition...');
-    if (this.recognition && this.isListening) {
-      try {
-        this.recognition.start();
-      } catch (error) {
-        console.error('Error resuming recognition:', error);
+    this.isPaused = false;
+    this.isProcessing = false;
+    
+    if (this.isListening && !this.isProcessing) {
+      // On mobile, require user interaction to restart
+      if (this.isMobile) {
+        console.log('Mobile: Recognition will restart on next user interaction');
+      } else {
+        setTimeout(() => {
+          this.startRecognition();
+        }, 500);
       }
+    }
+  }
+
+  // Add method for mobile to manually restart recognition
+  restartRecognition(): void {
+    if (this.isMobile && this.isListening && !this.isPaused && !this.isProcessing) {
+      this.startRecognition();
     }
   }
 
@@ -139,6 +192,14 @@ export class AudioProcessor {
     console.log('Stopping speech recognition...');
     
     this.isListening = false;
+    this.isPaused = false;
+    this.isProcessing = false;
+    this.lastTranscript = '';
+    
+    if (this.transcriptTimeout) {
+      clearTimeout(this.transcriptTimeout);
+      this.transcriptTimeout = null;
+    }
     
     if (this.recognition) {
       try {
