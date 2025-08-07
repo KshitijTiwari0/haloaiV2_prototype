@@ -1,4 +1,4 @@
-// Add these methods to your TextToSpeechEngine class
+import axios from 'axios';
 
 export class TextToSpeechEngine {
   private elevenLabsApiKey?: string;
@@ -6,7 +6,9 @@ export class TextToSpeechEngine {
   private maxChars: number = 5000;
   private lastApiCall: number = 0;
   private minDelay: number = 1000;
-  private audioProcessor: AudioProcessor | null = null; // Add reference to audio processor
+  private audioProcessor: any = null;
+  private onSpeakingStartCallback: (() => void) | null = null;
+  private onSpeakingEndCallback: (() => void) | null = null;
 
   constructor(elevenLabsApiKey?: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM") {
     this.elevenLabsApiKey = elevenLabsApiKey;
@@ -15,65 +17,19 @@ export class TextToSpeechEngine {
   }
 
   // Add method to set audio processor reference
-  setAudioProcessor(processor: AudioProcessor) {
+  setAudioProcessor(processor: any) {
     this.audioProcessor = processor;
   }
 
-  // Modified speakText method with mobile audio handling
-  async speakText(text: string, pauseRecording: boolean = true): Promise<void> {
-    if (!text || text.trim() === "") {
-      console.warn('No valid text provided for TTS');
-      throw new Error('No text to speak');
-    }
-
-    console.log(`Processing text for TTS: ${text}`);
-
-    // Always pause recording during TTS to prevent feedback
-    if (this.audioProcessor) {
-      this.audioProcessor.pauseRecording();
-    }
-
-    try {
-      if (this.elevenLabsApiKey) {
-        const chunks = this.splitText(text);
-        let success = true;
-
-        for (let i = 0; i < chunks.length; i++) {
-          console.log(`Speaking chunk ${i + 1}/${chunks.length}: ${chunks[i].substring(0, 50)}...`);
-          if (!(await this.speakWithElevenLabs(chunks[i]))) {
-            success = false;
-            break;
-          }
-        }
-
-        if (!success) {
-          console.warn('Falling back to Web Speech API due to Eleven Labs failure');
-          await this.speakWithWebSpeech(text);
-        }
-      } else {
-        console.warn('No Eleven Labs API key provided, using Web Speech API');
-        await this.speakWithWebSpeech(text);
-      }
-    } finally {
-      // Resume recording with longer delay on mobile
-      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const delay = isMobile ? 2000 : 1000; // 2 seconds on mobile, 1 second on desktop
-      
-      setTimeout(() => {
-        if (this.audioProcessor) {
-          this.audioProcessor.resumeRecording();
-          // On mobile, manually restart recognition
-          if (isMobile) {
-            setTimeout(() => {
-              (this.audioProcessor as any).restartRecognition?.();
-            }, 500);
-          }
-        }
-      }, delay);
-    }
+  // Add methods to set speaking callbacks
+  setOnSpeakingStart(callback: () => void) {
+    this.onSpeakingStartCallback = callback;
   }
 
-  // Rest of your existing methods...
+  setOnSpeakingEnd(callback: () => void) {
+    this.onSpeakingEndCallback = callback;
+  }
+
   private splitText(text: string): string[] {
     if (text.length <= this.maxChars) {
       return [text];
@@ -105,33 +61,39 @@ export class TextToSpeechEngine {
     try {
       console.log(`Attempting to use Eleven Labs API with voice_id: ${this.voiceId} for text: ${text.substring(0, 50)}...`);
       
+      // Enforce minimum delay to avoid rate limits
       const elapsed = Date.now() - this.lastApiCall;
       if (elapsed < this.minDelay) {
         await new Promise(resolve => setTimeout(resolve, this.minDelay - elapsed));
       }
 
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': this.elevenLabsApiKey!,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg'
-        },
-        body: JSON.stringify({
-          text: text,
-          model_id: "eleven_monolingual_v1",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5
-          }
-        })
+      const headers = {
+        'xi-api-key': this.elevenLabsApiKey!,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      };
+
+      const data = {
+        text: text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.5
+        }
+      };
+
+      const response = await axios.post(url, data, {
+        headers,
+        timeout: 20000,
+        responseType: 'blob'
       });
 
       this.lastApiCall = Date.now();
 
-      if (response.ok) {
-        const audioBlob = new Blob([await response.arrayBuffer()], { type: 'audio/mpeg' });
+      if (response.status === 200) {
+        // Create audio element and play
+        const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         
@@ -145,17 +107,15 @@ export class TextToSpeechEngine {
             resolve(void 0);
           };
           audio.onerror = reject;
-          
-          // Handle mobile audio play restrictions
-          audio.play().catch(error => {
-            console.error('Audio play error:', error);
-            reject(error);
-          });
+          audio.play();
         });
 
+        console.log('Successfully played audio with Eleven Labs');
         return true;
+      } else {
+        console.error(`Eleven Labs API error: ${response.status}`);
+        return false;
       }
-      return false;
     } catch (error) {
       console.error('Error with Eleven Labs API:', error);
       return false;
@@ -191,5 +151,64 @@ export class TextToSpeechEngine {
 
       console.log(`Speaking with Web Speech API: ${text}`);
     });
+  }
+
+  async speakText(text: string, pauseRecording: boolean = true): Promise<void> {
+    if (!text || text.trim() === "") {
+      console.warn('No valid text provided for TTS');
+      throw new Error('No text to speak');
+    }
+
+    console.log(`Processing text for TTS: ${text}`);
+
+    // Notify that AI is starting to speak
+    this.onSpeakingStartCallback?.();
+
+    // Always pause recording during TTS to prevent feedback
+    if (this.audioProcessor) {
+      this.audioProcessor.pauseRecording();
+    }
+
+    try {
+      if (this.elevenLabsApiKey) {
+        const chunks = this.splitText(text);
+        let success = true;
+
+        for (let i = 0; i < chunks.length; i++) {
+          console.log(`Speaking chunk ${i + 1}/${chunks.length}: ${chunks[i].substring(0, 50)}...`);
+          if (!(await this.speakWithElevenLabs(chunks[i]))) {
+            success = false;
+            break;
+          }
+        }
+
+        if (!success) {
+          console.warn('Falling back to Web Speech API due to Eleven Labs failure');
+          await this.speakWithWebSpeech(text);
+        }
+      } else {
+        console.warn('No Eleven Labs API key provided, using Web Speech API');
+        await this.speakWithWebSpeech(text);
+      }
+    } finally {
+      // Notify that AI has finished speaking
+      this.onSpeakingEndCallback?.();
+
+      // Resume recording with longer delay on mobile
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const delay = isMobile ? 2000 : 1000; // 2 seconds on mobile, 1 second on desktop
+      
+      setTimeout(() => {
+        if (this.audioProcessor) {
+          this.audioProcessor.resumeRecording();
+          // On mobile, manually restart recognition
+          if (isMobile) {
+            setTimeout(() => {
+              this.audioProcessor?.restartRecognition?.();
+            }, 500);
+          }
+        }
+      }, delay);
+    }
   }
 }

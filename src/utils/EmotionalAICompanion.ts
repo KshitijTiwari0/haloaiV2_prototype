@@ -15,10 +15,13 @@ export class EmotionalAICompanion {
   private isCallActive: boolean = false;
   private currentUserId: string | null = null;
   
+  // Callback functions
   private onSpeechStartCallback: (() => void) | null = null;
   private onSpeechEndCallback: (() => void) | null = null;
   private onProcessingStartCallback: (() => void) | null = null;
   private onProcessingEndCallback: (() => void) | null = null;
+  private onAISpeakingStartCallback: (() => void) | null = null;
+  private onAISpeakingEndCallback: (() => void) | null = null;
 
   constructor(openrouterApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -29,7 +32,19 @@ export class EmotionalAICompanion {
       configManager.get('eleven_labs_api_key'),
       configManager.get('voice_id') || "21m00Tcm4TlvDq8ikWAM"
     );
+    
+    // Connect TTS engine with audio processor
     this.ttsEngine.setAudioProcessor(this.audioProcessor);
+    
+    // Set up TTS callbacks
+    this.ttsEngine.setOnSpeakingStart(() => {
+      this.onAISpeakingStartCallback?.();
+    });
+    
+    this.ttsEngine.setOnSpeakingEnd(() => {
+      this.onAISpeakingEndCallback?.();
+    });
+    
     this.initializeUser();
   }
 
@@ -41,10 +56,15 @@ export class EmotionalAICompanion {
       }
   }
 
+  // Existing callback setters
   public setOnSpeechStart(callback: () => void) { this.onSpeechStartCallback = callback; }
   public setOnSpeechEnd(callback: () => void) { this.onSpeechEndCallback = callback; }
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
+  
+  // New callback setters for AI speaking
+  public setOnAISpeakingStart(callback: () => void) { this.onAISpeakingStartCallback = callback; }
+  public setOnAISpeakingEnd(callback: () => void) { this.onAISpeakingEndCallback = callback; }
 
   private async onTranscriptUpdate(transcript: { text: string; final: boolean }): Promise<void> {
     if (!transcript.final || !transcript.text) return;
