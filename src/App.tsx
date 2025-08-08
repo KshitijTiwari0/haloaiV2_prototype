@@ -98,14 +98,10 @@ function App() {
 
   if (isCheckingAuth) {
     return (
-      <div className="relative min-h-screen text-white">
-        <div className="absolute inset-0 bg-aurora animate-gradient-slow" />
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_60%,rgba(0,0,0,0.55)_100%)]" />
-        <div className="relative z-10 min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-emerald-500 mx-auto mb-4"></div>
           <p className="text-white text-lg">Checking authentication...</p>
-        </div>
         </div>
       </div>
     );
@@ -113,15 +109,11 @@ function App() {
 
   if (isInitializing) {
     return (
-      <div className="relative min-h-screen text-white">
-        <div className="absolute inset-0 bg-aurora animate-gradient-slow" />
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_60%,rgba(0,0,0,0.55)_100%)]" />
-        <div className="relative z-10 min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-emerald-500 mx-auto mb-4"></div>
           <p className="text-white text-lg">Initializing AI companion...</p>
-          <p className="text-gray-200 text-sm mt-2">Setting up transcription services...</p>
-        </div>
+          <p className="text-gray-400 text-sm mt-2">Setting up transcription services...</p>
         </div>
       </div>
     );
@@ -136,10 +128,7 @@ function App() {
   }
 
   return (
-    <div className="relative min-h-screen text-white">
-      <div className="absolute inset-0 bg-aurora animate-gradient-slow" />
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_60%,rgba(0,0,0,0.55)_100%)]" />
-      <div className="relative z-10 min-h-screen flex items-center justify-center">
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
       <div className="text-center">
         <p className="text-white text-lg">Something went wrong. Please refresh the page.</p>
         <button 
@@ -148,7 +137,6 @@ function App() {
         >
           Refresh
         </button>
-      </div>
       </div>
     </div>
   );

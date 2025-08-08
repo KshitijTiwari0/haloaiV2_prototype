@@ -48,20 +48,17 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen text-white">
-      <div className="absolute inset-0 bg-aurora animate-gradient-slow" />
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_60%,rgba(0,0,0,0.55)_100%)]" />
-      <div className="relative z-10 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8 animate-fade-in-up">
+        <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-2">
-            <span className="text-white">humo</span>
-            <span className="text-pink-500 text-glow-pink">.ai</span>
+            <span className="text-white">Halo</span>
+            <span className="text-red-500">.AI</span>
           </h1>
           <h2 className="text-2xl font-semibold text-white mb-2">
             {isSignUp ? 'Create Account' : "Let's Get Started!"}
           </h2>
-          <p className="text-gray-300">Discover the latest 1000+ Voice Effects</p>
+          <p className="text-gray-400">Discover the latest 1000+ Voice Effects</p>
         </div>
 
         {error && (
@@ -70,7 +67,7 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
-        <div className="space-y-4 glass rounded-2xl p-6 border border-white/10">
+        <div className="space-y-4">
           <form onSubmit={handleEmailAuth} className="space-y-4">
             <div>
               <input
@@ -79,7 +76,7 @@ export const LoginPage: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 transition-all"
+                className="w-full bg-gray-800 border border-gray-600 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 transition-colors"
               />
             </div>
             <div className="relative">
@@ -90,12 +87,12 @@ export const LoginPage: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
-                className="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 transition-all pr-12"
+                className="w-full bg-gray-800 border border-gray-600 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 transition-colors pr-12"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-300 hover:text-white"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
@@ -103,7 +100,7 @@ export const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-4 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-3 hover:scale-[1.01] active:scale-95 shadow-xl"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-4 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-3"
             >
               <Mail size={20} />
               <span>{loading ? 'Please wait...' : (isSignUp ? 'Sign Up' : 'Sign In')}</span>
@@ -122,7 +119,7 @@ export const LoginPage: React.FC = () => {
           <button
             onClick={handleGoogleAuth}
             disabled={loading}
-            className="w-full bg-white/5 hover:bg-white/10 disabled:bg-gray-600 disabled:cursor-not-allowed border border-white/10 text-white font-medium py-4 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-3 hover:scale-[1.01] active:scale-95 shadow-xl"
+            className="w-full bg-gray-800 hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed border border-gray-600 text-white font-medium py-4 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-3"
           >
             <Chrome size={20} />
             <span>{loading ? 'Please wait...' : 'Continue with Google'}</span>
@@ -131,13 +128,12 @@ export const LoginPage: React.FC = () => {
           <div className="text-center mt-8">
             <button 
               onClick={() => setIsSignUp(!isSignUp)}
-              className="text-gray-200 hover:text-white transition-colors"
+              className="text-gray-400 hover:text-gray-300 transition-colors"
             >
               {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
             </button>
           </div>
         </div>
-      </div>
       </div>
     </div>
   );

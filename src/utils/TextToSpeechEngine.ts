@@ -9,45 +9,19 @@ export class TextToSpeechEngine {
   private audioProcessor: any = null;
   private onSpeakingStartCallback: (() => void) | null = null;
   private onSpeakingEndCallback: (() => void) | null = null;
-  private currentAudio: HTMLAudioElement | null = null;
-  private isMobile: boolean = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  private isAndroid: boolean = /Android/i.test(navigator.userAgent);
 
   constructor(elevenLabsApiKey?: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM") {
     this.elevenLabsApiKey = elevenLabsApiKey;
     this.voiceId = voiceId;
-    console.log(`TextToSpeechEngine initialized with voice_id: ${voiceId}, API key provided: ${!!elevenLabsApiKey}, Mobile: ${this.isMobile}`);
-    
-    // Set up audio context for mobile
-    if (this.isAndroid) {
-      this.initializeAudioContext();
-    }
+    console.log(`TextToSpeechEngine initialized with voice_id: ${voiceId}, API key provided: ${!!elevenLabsApiKey}`);
   }
 
-  private initializeAudioContext() {
-    // Create a silent audio context to enable audio on Android
-    try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      gainNode.gain.value = 0; // Silent
-      
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.01);
-      
-      console.log('Audio context initialized for Android');
-    } catch (error) {
-      console.warn('Could not initialize audio context:', error);
-    }
-  }
-
+  // Add method to set audio processor reference
   setAudioProcessor(processor: any) {
     this.audioProcessor = processor;
   }
 
+  // Add methods to set speaking callbacks
   setOnSpeakingStart(callback: () => void) {
     this.onSpeakingStartCallback = callback;
   }
@@ -85,7 +59,7 @@ export class TextToSpeechEngine {
 
   private async speakWithElevenLabs(text: string): Promise<boolean> {
     try {
-      console.log(`Attempting to use Eleven Labs API for text: ${text.substring(0, 50)}...`);
+      console.log(`Attempting to use Eleven Labs API with voice_id: ${this.voiceId} for text: ${text.substring(0, 50)}...`);
       
       // Enforce minimum delay to avoid rate limits
       const elapsed = Date.now() - this.lastApiCall;
@@ -111,70 +85,29 @@ export class TextToSpeechEngine {
 
       const response = await axios.post(url, data, {
         headers,
-        timeout: 30000, // Longer timeout for mobile
+        timeout: 20000,
         responseType: 'blob'
       });
 
       this.lastApiCall = Date.now();
 
       if (response.status === 200) {
-        // Stop any current audio
-        if (this.currentAudio) {
-          this.currentAudio.pause();
-          this.currentAudio = null;
-        }
-
-        // Create audio element with Android-specific settings
+        // Create audio element and play
         const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
         const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio();
+        const audio = new Audio(audioUrl);
         
-        // Android-specific audio settings
+        // Mobile-specific audio settings
         audio.preload = 'auto';
-        audio.volume = this.isAndroid ? 1.0 : 0.8; // Full volume on Android
-        audio.crossOrigin = 'anonymous';
+        audio.volume = 0.8; // Slightly lower volume for mobile
         
-        // Handle Android-specific audio loading
-        if (this.isAndroid) {
-          audio.load(); // Explicitly load on Android
-        }
-        
-        this.currentAudio = audio;
-        
-        await new Promise<void>((resolve, reject) => {
-          const cleanup = () => {
-            URL.revokeObjectURL(audioUrl);
-            if (this.currentAudio === audio) {
-              this.currentAudio = null;
-            }
-          };
-
+        await new Promise((resolve, reject) => {
           audio.onended = () => {
-            cleanup();
-            resolve();
+            URL.revokeObjectURL(audioUrl);
+            resolve(void 0);
           };
-          
-          audio.onerror = (error) => {
-            console.error('Audio playback error:', error);
-            cleanup();
-            reject(error);
-          };
-
-          audio.oncanplaythrough = () => {
-            console.log('Audio can play through');
-          };
-
-          audio.src = audioUrl;
-          
-          // Android-specific play handling
-          const playPromise = audio.play();
-          if (playPromise) {
-            playPromise.catch(error => {
-              console.error('Play promise rejected:', error);
-              cleanup();
-              reject(error);
-            });
-          }
+          audio.onerror = reject;
+          audio.play();
         });
 
         console.log('Successfully played audio with Eleven Labs');
@@ -199,85 +132,24 @@ export class TextToSpeechEngine {
       // Cancel any ongoing speech
       speechSynthesis.cancel();
 
-      // Wait for voices to load (especially important on Android)
-      const speakWhenReady = () => {
-        const voices = speechSynthesis.getVoices();
-        console.log(`Available voices: ${voices.length}`);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9; // Slightly slower for mobile
+      utterance.pitch = 1;
+      utterance.volume = 0.8; // Lower volume for mobile
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        
-        // Android-optimized settings
-        utterance.rate = this.isAndroid ? 0.8 : 0.9; // Slower on Android
-        utterance.pitch = 1;
-        utterance.volume = 1; // Full volume on Android
-        
-        // Try to use a good English voice
-        const englishVoices = voices.filter(voice => 
-          voice.lang.startsWith('en') && 
-          (voice.name.includes('Google') || voice.name.includes('Chrome') || voice.default)
-        );
-        
-        if (englishVoices.length > 0) {
-          utterance.voice = englishVoices[0];
-          console.log(`Using voice: ${utterance.voice.name}`);
-        }
+      utterance.onend = () => resolve();
+      utterance.onerror = (event) => reject(event.error);
 
-        utterance.onend = () => {
-          console.log('Web Speech synthesis ended');
-          resolve();
-        };
-        
-        utterance.onerror = (event) => {
-          console.error('Web Speech synthesis error:', event);
-          reject(event.error);
-        };
-
-        utterance.onstart = () => {
-          console.log('Web Speech synthesis started');
-        };
-
-        // Android-specific speech handling
-        if (this.isAndroid) {
-          // Ensure speech synthesis is ready
-          if (speechSynthesis.speaking) {
-            speechSynthesis.cancel();
-          }
-          
-          // Additional delay for Android
-          setTimeout(() => {
-            try {
-              speechSynthesis.speak(utterance);
-              console.log(`Speaking with Web Speech API on Android: ${text.substring(0, 50)}...`);
-            } catch (error) {
-              console.error('Error starting speech on Android:', error);
-              reject(error);
-            }
-          }, 200);
-        } else {
-          speechSynthesis.speak(utterance);
-          console.log(`Speaking with Web Speech API: ${text.substring(0, 50)}...`);
-        }
-      };
-
-      // Check if voices are already loaded
-      const voices = speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        speakWhenReady();
-      } else {
-        // Wait for voices to load (important on Android Chrome)
-        speechSynthesis.onvoiceschanged = () => {
-          speechSynthesis.onvoiceschanged = null;
-          speakWhenReady();
-        };
-        
-        // Fallback timeout in case onvoiceschanged doesn't fire
-        setTimeout(() => {
-          if (speechSynthesis.onvoiceschanged) {
-            speechSynthesis.onvoiceschanged = null;
-            speakWhenReady();
-          }
-        }, 1000);
+      // Mobile-specific: ensure speech synthesis is ready
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
       }
+
+      setTimeout(() => {
+        speechSynthesis.speak(utterance);
+      }, 100);
+
+      console.log(`Speaking with Web Speech API: ${text}`);
     });
   }
 
@@ -287,7 +159,7 @@ export class TextToSpeechEngine {
       throw new Error('No text to speak');
     }
 
-    console.log(`Processing text for TTS on ${this.isAndroid ? 'Android' : 'other'}: ${text}`);
+    console.log(`Processing text for TTS: ${text}`);
 
     // Notify that AI is starting to speak
     this.onSpeakingStartCallback?.();
@@ -308,11 +180,6 @@ export class TextToSpeechEngine {
             success = false;
             break;
           }
-          
-          // Add delay between chunks on Android
-          if (this.isAndroid && i < chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
         }
 
         if (!success) {
@@ -328,35 +195,20 @@ export class TextToSpeechEngine {
       this.onSpeakingEndCallback?.();
 
       // Resume recording with longer delay on mobile
-      const delay = this.isAndroid ? 3000 : (this.isMobile ? 2000 : 1000);
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const delay = isMobile ? 2000 : 1000; // 2 seconds on mobile, 1 second on desktop
       
       setTimeout(() => {
         if (this.audioProcessor) {
           this.audioProcessor.resumeRecording();
-          
-          // On mobile, don't auto-restart - require user interaction
-          if (this.isMobile) {
-            console.log('Mobile: Speech recognition resumed but needs manual restart');
+          // On mobile, manually restart recognition
+          if (isMobile) {
+            setTimeout(() => {
+              this.audioProcessor?.restartRecognition?.();
+            }, 500);
           }
         }
       }, delay);
     }
-  }
-
-  // Method to stop any current audio playback
-  stopSpeaking(): void {
-    // Stop Eleven Labs audio
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio = null;
-    }
-    
-    // Stop Web Speech API
-    if (speechSynthesis.speaking) {
-      speechSynthesis.cancel();
-    }
-    
-    // Notify that speaking has ended
-    this.onSpeakingEndCallback?.();
   }
 }
