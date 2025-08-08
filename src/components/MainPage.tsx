@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { Mic, MicOff, User, LogOut } from 'lucide-react';
+import { Mic, MicOff, User, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
+import BackgroundFX from './BackgroundFX';
 import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
 import { ConfigManager } from '../utils/ConfigManager';
 import { signOut } from '../lib/supabase';
@@ -113,16 +114,18 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 text-white">
+    <div className="relative min-h-screen text-white">
+      <BackgroundFX />
+      <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
       {/* Header */}
       <div className="absolute top-4 right-4 flex items-center space-x-4">
-        <div className="flex items-center space-x-2 text-sm text-gray-300">
+        <div className="flex items-center space-x-2 text-sm text-gray-200">
           <User size={16} />
           <span>{user?.email}</span>
         </div>
         <button
           onClick={handleSignOut}
-          className="flex items-center space-x-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"
+          className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
         >
           <LogOut size={16} />
           <span>Sign Out</span>
@@ -139,11 +142,11 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         />
         
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">
-            <span className="text-white">Halo</span>
-            <span className="text-red-500">.AI</span>
+          <h1 className="text-3xl font-bold mb-2 animate-fade-in-up">
+            <span className="text-white">humo</span>
+            <span className="text-pink-500 text-glow-pink">.ai</span>
           </h1>
-          <p className={`transition-colors duration-300 ${getStatusColor()}`}>
+          <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up`}>
             {getStatusMessage()}
           </p>
         </div>
@@ -154,50 +157,44 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             <button
               onClick={handleStartCall}
               disabled={isProcessing}
-              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-emerald-500 hover:bg-emerald-600 shadow-lg disabled:bg-gray-600 disabled:cursor-not-allowed hover:scale-105 active:scale-95"
+              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-emerald-500 hover:bg-emerald-600 shadow-xl disabled:bg-gray-600 disabled:cursor-not-allowed hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-300/60"
             >
               <Mic />
             </button>
           ) : (
             <button
               onClick={handleEndCall}
-              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 shadow-lg hover:scale-105 active:scale-95"
+              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 shadow-xl hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-300/60"
             >
               <MicOff />
             </button>
           )}
         </div>
 
-        {/* Visual state indicators */}
-        <div className="flex justify-center space-x-4 mb-4">
-          <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm transition-all duration-300 ${
-            isCallActive ? 'bg-blue-900/30 text-blue-400' : 'bg-gray-800 text-gray-500'
-          }`}>
-            <div className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-blue-400' : 'bg-gray-500'}`}></div>
-            <span>Connected</span>
+        {/* Visual state indicators as animated gradient pills */}
+        <div className="flex justify-center gap-3 mb-4">
+          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
+            <span className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-sky-400 animate-pulse' : 'bg-gray-500'}`} />
+            <span className="hidden sm:inline">Connected</span>
+            <Activity size={14} className={`${isCallActive ? 'text-sky-400' : 'text-gray-500'}`} />
           </div>
-          
-          <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm transition-all duration-300 ${
-            isUserSpeaking ? 'bg-red-900/30 text-red-400' : 'bg-gray-800 text-gray-500'
-          }`}>
-            <div className={`w-2 h-2 rounded-full ${isUserSpeaking ? 'bg-red-400 animate-pulse' : 'bg-gray-500'}`}></div>
-            <span>Speaking</span>
+          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
+            <Volume2 size={14} className={`${isUserSpeaking ? 'text-pink-400 animate-pulse' : 'text-gray-500'}`} />
+            <span className="hidden sm:inline">Speaking</span>
           </div>
-          
-          <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm transition-all duration-300 ${
-            isAISpeaking ? 'bg-green-900/30 text-green-400' : 'bg-gray-800 text-gray-500'
-          }`}>
-            <div className={`w-2 h-2 rounded-full ${isAISpeaking ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`}></div>
-            <span>AI Response</span>
+          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
+            <MessageSquare size={14} className={`${isAISpeaking ? 'text-emerald-400 animate-pulse' : 'text-gray-500'}`} />
+            <span className="hidden sm:inline">AI Response</span>
           </div>
         </div>
 
         {/* Error messages */}
         {error && (
-          <div className="mt-4 p-4 bg-red-900/30 border border-red-500 rounded-lg text-red-200">
+          <div className="mt-4 p-4 glass border border-red-500/50 rounded-xl text-red-200">
             <p>❌ {error}</p>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
