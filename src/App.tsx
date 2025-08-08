@@ -121,7 +121,7 @@ function App() {
         companion.stopCall();
       }
     };
-  }, [configManager, initializeAICompanion, companion]);
+  }, [configManager, initializeAICompanion]);
 
   // Loading screen component
   const LoadingScreen = ({ title, subtitle }: { title: string; subtitle?: string }) => (
