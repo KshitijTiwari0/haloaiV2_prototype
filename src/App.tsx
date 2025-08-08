@@ -5,6 +5,7 @@ import { LoginPage } from './components/LoginPage';
 import { MainPage } from './components/MainPage';
 import { EmotionalAICompanion } from './utils/EmotionalAICompanion';
 import { ConfigManager } from './utils/ConfigManager';
+import { User } from '@supabase/supabase-js';
 
 // Get API keys from environment variables - simplified to only required ones
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
@@ -16,7 +17,7 @@ function App() {
   const [configManager] = useState(() => new ConfigManager());
   const [isInitializing, setIsInitializing] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
 
   // Centralized AI companion initialization
