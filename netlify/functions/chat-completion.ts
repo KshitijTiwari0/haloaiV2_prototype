@@ -1,117 +1,3 @@
-// netlify/functions/transcribe-audio.ts
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-
-const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
-  // Handle CORS preflight
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "POST, OPTIONS"
-      },
-      body: ''
-    };
-  }
-
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
-      body: JSON.stringify({ error: "Method Not Allowed" })
-    };
-  }
-
-  try {
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    
-    if (!OPENAI_API_KEY) {
-      console.error('OpenAI API key not found in environment variables');
-      return {
-        statusCode: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
-        body: JSON.stringify({ 
-          error: "OpenAI API key is not configured on the server" 
-        })
-      };
-    }
-
-    // Parse the multipart form data
-    const contentType = event.headers['content-type'] || event.headers['Content-Type'];
-    if (!contentType || !contentType.includes('multipart/form-data')) {
-      return {
-        statusCode: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
-        body: JSON.stringify({ error: "Content-Type must be multipart/form-data" })
-      };
-    }
-
-    // Forward the request to OpenAI Whisper API
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': contentType
-      },
-      body: event.body
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI Whisper API error:', response.status, errorText);
-      return {
-        statusCode: response.status,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
-        body: JSON.stringify({ 
-          error: `Whisper API error: ${response.status}`,
-          details: errorText
-        })
-      };
-    }
-
-    const result = await response.json();
-    
-    return {
-      statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
-      body: JSON.stringify(result)
-    };
-
-  } catch (error) {
-    console.error('Error in transcribe-audio function:', error);
-    return {
-      statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
-      body: JSON.stringify({ 
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      })
-    };
-  }
-};
-
-export { handler };
-
-// netlify/functions/chat-completion.ts
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
@@ -226,20 +112,41 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
     // Handle streaming response
     if (openaiRequest.stream) {
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": "text/plain",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive"
-        },
-        body: response.body,
-        isBase64Encoded: false
-      };
+      // For streaming responses, we need to return the stream directly
+      // Note: Netlify Functions have limitations with streaming, so we'll handle this differently
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body for streaming');
+      }
+
+      let streamedContent = '';
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value);
+          streamedContent += chunk;
+        }
+
+        return {
+          statusCode: 200,
+          headers: {
+            "Content-Type": "text/plain",
+            "Access-Control-Allow-Origin": "*"
+          },
+          body: streamedContent
+        };
+      } finally {
+        reader.releaseLock();
+      }
     } else {
       // Handle non-streaming response
       const result = await response.json();
+      console.log('Chat completion successful:', result.choices?.[0]?.message?.content?.substring(0, 100) + '...');
+      
       return {
         statusCode: 200,
         headers: {
@@ -259,4 +166,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         "Access-Control-Allow-Origin": "*"
       },
       body: JSON.stringify({ 
-        error:
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      })
+    };
+  }
+};
+
+export { handler };

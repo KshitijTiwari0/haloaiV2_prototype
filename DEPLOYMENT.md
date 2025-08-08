@@ -1,4 +1,4 @@
-# Deployment Guide for Halo.AI
+# Deployment Guide for Halo.AI - Simplified Stack
 
 ## Environment Variables Setup
 
@@ -10,11 +10,19 @@
    ```
 
 2. **Add your API keys to `.env`**:
-   ```
-   VITE_OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
-   VITE_ELEVEN_LABS_API_KEY=sk_your-actual-key-here
-   VITE_OPENAI_API_KEY=sk-your-actual-key-here
-   VITE_ASSEMBLYAI_API_KEY=your-actual-key-here
+   ```env
+   # Required - OpenAI API for transcription and AI responses
+   VITE_OPENAI_API_KEY=sk-your-actual-openai-key-here
+
+   # Required - Eleven Labs API for premium text-to-speech
+   VITE_ELEVEN_LABS_API_KEY=sk_your-actual-eleven-labs-key-here
+
+   # Required - Supabase for authentication and database
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+   # Server-side keys for Netlify Functions (optional but recommended for security)
+   OPENAI_API_KEY=sk-your-actual-openai-key-here
    ```
 
 3. **Start the development server**:
@@ -32,93 +40,187 @@
 4. **Select "Environment variables"**
 5. **Add each variable**:
 
-   | Key | Value | Required |
-   |-----|-------|----------|
-   | `VITE_OPENROUTER_API_KEY` | `sk-or-v1-your-actual-key-here` | ✅ Yes |
-   | `VITE_ELEVEN_LABS_API_KEY` | `sk_your-actual-key-here` | ❌ Optional |
-   | `VITE_OPENAI_API_KEY` | `sk-your-actual-key-here` | ❌ Optional |
-   | `VITE_ASSEMBLYAI_API_KEY` | `your-actual-key-here` | ❌ Optional |
-   | `VITE_SUPABASE_URL` | `https://your-project.supabase.co` | ✅ Yes |
-   | `VITE_SUPABASE_ANON_KEY` | `your-supabase-anon-key` | ✅ Yes |
+   | Key | Value | Required | Usage |
+   |-----|-------|----------|-------|
+   | `VITE_OPENAI_API_KEY` | `sk-your-openai-key` | ✅ Yes | Client-side OpenAI calls |
+   | `VITE_ELEVEN_LABS_API_KEY` | `sk_your-eleven-labs-key` | ✅ Yes | Client-side Eleven Labs TTS |
+   | `VITE_SUPABASE_URL` | `https://your-project.supabase.co` | ✅ Yes | Supabase connection |
+   | `VITE_SUPABASE_ANON_KEY` | `your-supabase-anon-key` | ✅ Yes | Supabase authentication |
+   | `OPENAI_API_KEY` | `sk-your-openai-key` | 🔒 Recommended | Server-side API calls (more secure) |
 
 #### Step 2: Deploy
 
 Once environment variables are configured, your next deployment will automatically use them.
 
-## API Key Requirements
+## API Key Requirements - Simplified Stack
 
-### Required for Basic Functionality:
-- **OpenRouter API Key**: Get from [OpenRouter](https://openrouter.ai/)
-  - Free tier available
-  - Required for AI responses
-- **Supabase Project**: Get from [Supabase](https://supabase.com/)
-  - Free tier available
-  - Required for user authentication
+### Required Services:
 
-### Optional for Enhanced Features:
-- **Eleven Labs API Key**: Get from [Eleven Labs](https://elevenlabs.io/)
-  - Premium text-to-speech
-  - Falls back to Web Speech API if not provided
+1. **OpenAI API** - Get from [OpenAI Platform](https://platform.openai.com/)
+   - **Usage**: Whisper transcription + GPT responses
+   - **Cost**: $0.006/minute for Whisper + token-based pricing for GPT
+   - **Why**: Best-in-class transcription accuracy and AI responses
 
-- **OpenAI API Key**: Get from [OpenAI](https://platform.openai.com/)
-  - Premium Whisper transcription
-  - Falls back to free services if not provided
+2. **Eleven Labs API** - Get from [Eleven Labs](https://elevenlabs.io/)
+   - **Usage**: Premium text-to-speech
+   - **Cost**: $0.30/1K characters (or subscription plans)
+   - **Why**: High-quality, natural voice synthesis
 
-- **AssemblyAI API Key**: Get from [AssemblyAI](https://www.assemblyai.com/)
-  - Alternative premium transcription
-  - Free tier available
+3. **Supabase Project** - Get from [Supabase](https://supabase.com/)
+   - **Usage**: User authentication + conversation storage
+   - **Cost**: Free tier available
+   - **Why**: Simple auth + database solution
 
-## Free vs Premium Features
+### Removed Services (No Longer Needed):
+- ❌ OpenRouter (replaced by direct OpenAI)
+- ❌ AssemblyAI (replaced by OpenAI Whisper)
+- ❌ Hugging Face transcription (replaced by OpenAI Whisper)
 
-### Works with Free Tier:
-- ✅ Voice recording and processing
-- ✅ User authentication (email + Google)
-- ✅ Emotion analysis
-- ✅ AI responses (OpenRouter free tier)
-- ✅ Transcription (Hugging Face free API)
-- ✅ Text-to-speech (Web Speech API)
+## Architecture Overview
 
-### Premium Enhancements:
-- 🚀 Higher quality transcription (OpenAI Whisper)
-- 🚀 Premium voice synthesis (Eleven Labs)
-- 🚀 Faster processing times
-- 🚀 Higher rate limits
+```
+User → Browser → Netlify Functions → OpenAI API
+                      ↓
+                 Eleven Labs API
+                      ↓
+                 Supabase Database
+```
 
-## Security Notes
+## Security Improvements
 
-- ✅ API keys are stored as environment variables
-- ✅ Keys are not committed to version control
-- ✅ Client-side keys are prefixed with `VITE_` for Vite
-- ⚠️ Client-side environment variables are visible in the browser
-- 💡 For production apps, consider using a backend proxy for sensitive APIs
+### Client-Side vs Server-Side API Calls
+
+**Current Setup (Client-Side):**
+- ✅ Faster response times
+- ⚠️ API keys visible in browser
+- ✅ Simpler implementation
+
+**Recommended Setup (Server-Side via Netlify Functions):**
+- 🔒 API keys hidden from browser
+- ✅ Better security
+- ✅ Rate limiting control
+- ⚠️ Slightly higher latency
+
+## Performance Optimizations
+
+1. **Reduced Latency**:
+   - Direct OpenAI calls (no OpenRouter proxy)
+   - Optimized audio chunk processing
+   - Simplified fallback logic
+
+2. **Better Mobile Support**:
+   - Whisper works consistently across devices
+   - No browser speech API dependencies
+   - Optimized audio recording
+
+3. **Simplified Error Handling**:
+   - Fewer services = fewer failure points
+   - Better error messages
+   - Automatic retry logic
+
+## Cost Estimation
+
+### Free Tier Capabilities:
+- **Supabase**: 50K monthly active users
+- **Netlify**: 100GB bandwidth, 125K function invocations
+
+### Paid Usage (per 1000 interactions):
+- **OpenAI Whisper**: ~$6 (1 minute average per interaction)
+- **OpenAI GPT-4o-mini**: ~$0.50 (average response)
+- **Eleven Labs**: ~$15 (50 words average response)
+- **Total**: ~$21.50 per 1000 interactions
+
+## Deployment Steps
+
+1. **Set up Supabase project**:
+   ```bash
+   # Enable Email + Google authentication
+   # Copy URL and anon key
+   ```
+
+2. **Configure Netlify**:
+   ```bash
+   # Connect GitHub repository
+   # Set environment variables
+   # Enable automatic deployments
+   ```
+
+3. **Test deployment**:
+   ```bash
+   # Verify all API keys work
+   # Test microphone permissions
+   # Test voice synthesis
+   ```
 
 ## Troubleshooting
 
-### Environment Variables Not Working:
-1. Ensure variables are prefixed with `VITE_`
-2. Restart the development server after adding variables
-3. Check Netlify environment variables are saved correctly
-4. Verify Supabase URL and anon key are correct
+### Common Issues:
 
-### Deployment Issues:
-1. Verify all required environment variables are set in Netlify
-2. Check the build logs for any missing dependencies
-3. Ensure the build command is `npm run build`
+1. **"OpenAI API key not configured"**:
+   - Check `VITE_OPENAI_API_KEY` in Netlify environment variables
+   - Ensure the key starts with `sk-`
+   - Verify the key has sufficient credits
 
-### API Key Issues:
-1. Verify API keys are valid and active
-2. Check API usage limits and quotas
-3. Test with a minimal example first
+2. **"Eleven Labs API key invalid"**:
+   - Check `VITE_ELEVEN_LABS_API_KEY` format
+   - Verify account has sufficient character credits
+   - Test key at https://api.elevenlabs.io/v1/voices
 
-### Authentication Issues:
-1. Check Supabase project settings
-2. Verify email/Google auth is enabled in Supabase
-3. Ensure redirect URLs are configured correctly
-4. Check browser console for auth errors
+3. **"Microphone access denied"**:
+   - Ensure HTTPS deployment (required for microphone)
+   - Check browser permissions
+   - Test on different browsers/devices
 
-## Build Configuration
+4. **"Supabase connection failed"**:
+   - Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+   - Check Supabase project is active
+   - Ensure auth providers are enabled
 
-The app is configured to work with Netlify's default build settings:
-- **Build command**: `npm run build`
-- **Publish directory**: `dist`
-- **Node version**: 18.x (recommended)
+### Build Issues:
+
+1. **Functions timeout**:
+   - Audio files too large (>10MB Netlify limit)
+   - Increase timeout in `netlify.toml`
+   - Implement client-side audio compression
+
+2. **Environment variables not loading**:
+   - Ensure variables are prefixed with `VITE_` for client-side
+   - Restart Netlify build after adding variables
+   - Check for typos in variable names
+
+## Testing Checklist
+
+- [ ] User can sign up/sign in with email
+- [ ] Google OAuth works
+- [ ] Microphone permission granted
+- [ ] Audio recording starts/stops
+- [ ] Transcription returns text
+- [ ] AI generates appropriate responses
+- [ ] Text-to-speech plays audio
+- [ ] Conversation history saves
+- [ ] User can sign out
+- [ ] Mobile devices work properly
+
+## Migration Notes
+
+If migrating from the previous multi-service setup:
+
+1. **Remove old environment variables**:
+   - `VITE_OPENROUTER_API_KEY`
+   - `VITE_ASSEMBLYAI_API_KEY`
+
+2. **Update API endpoints**:
+   - All transcription now goes through OpenAI Whisper
+   - All chat completions use OpenAI directly
+
+3. **Database schema unchanged**:
+   - No migration needed for existing user data
+   - Conversation history remains intact
+
+## Support
+
+For deployment issues:
+- Check Netlify build logs
+- Verify all environment variables
+- Test API keys manually
+- Review browser console for errors

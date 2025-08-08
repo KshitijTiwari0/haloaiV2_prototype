@@ -1,129 +1,22 @@
 export class AudioProcessor {
-  private recognition: any = null;
-  private isListening: boolean = false;
+  private mediaRecorder: MediaRecorder | null = null;
+  private audioChunks: Blob[] = [];
+  private isRecording: boolean = false;
   private isPaused: boolean = false;
+  private stream: MediaStream | null = null;
   private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean }) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
-  private lastTranscript: string = '';
-  private transcriptTimeout: number | null = null;
+  private recordingTimeout: number | null = null;
+  private silenceTimeout: number | null = null;
   private isProcessing: boolean = false;
 
-  // Mobile detection
-  private isMobile: boolean = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  // Configuration
+  private readonly MAX_RECORDING_TIME = 30000; // 30 seconds
+  private readonly SILENCE_TIMEOUT = 3000; // 3 seconds of silence
+  private readonly MIN_RECORDING_TIME = 1000; // 1 second minimum
 
   constructor() {
-    this.initializeSpeechRecognition();
-    console.log('AudioProcessor initialized for:', this.isMobile ? 'Mobile' : 'Desktop');
-  }
-
-  private initializeSpeechRecognition(): void {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      console.error('Speech Recognition not supported in this browser');
-      return;
-    }
-
-    this.recognition = new SpeechRecognition();
-    
-    // Mobile-optimized settings
-    this.recognition.continuous = !this.isMobile; // Less continuous on mobile
-    this.recognition.interimResults = !this.isMobile; // Disable interim on mobile
-    this.recognition.lang = 'en-US';
-    this.recognition.maxAlternatives = 1;
-
-    // Mobile-specific settings
-    if (this.isMobile) {
-      this.recognition.serviceURI = null; // Use default
-    }
-
-    this.recognition.onstart = () => {
-      console.log('Speech recognition started');
-      this.isListening = true;
-      this.onSpeechStartCallback?.();
-    };
-
-    this.recognition.onresult = (event: any) => {
-      if (this.isPaused || this.isProcessing) {
-        console.log('Recognition paused or processing, ignoring result');
-        return;
-      }
-
-      let finalTranscript = '';
-      
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript.trim();
-        
-        if (event.results[i].isFinal && transcript) {
-          finalTranscript = transcript;
-          break; // Only take the first final result
-        }
-      }
-
-      if (finalTranscript && finalTranscript !== this.lastTranscript) {
-        console.log('New final transcript:', finalTranscript);
-        this.lastTranscript = finalTranscript;
-        this.isProcessing = true;
-        
-        // Clear any existing timeout
-        if (this.transcriptTimeout) {
-          clearTimeout(this.transcriptTimeout);
-        }
-
-        // Send transcript and pause recognition
-        this.pauseRecording();
-        this.onTranscriptUpdateCallback?.({ 
-          text: finalTranscript, 
-          final: true 
-        });
-
-        // Reset processing flag after a delay
-        this.transcriptTimeout = setTimeout(() => {
-          this.isProcessing = false;
-          this.lastTranscript = '';
-        }, 3000) as unknown as number;
-      }
-    };
-
-    this.recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      
-      if (event.error === 'not-allowed') {
-        console.error('Microphone access denied');
-        return;
-      }
-
-      // Don't auto-restart on mobile errors
-      if (!this.isMobile && event.error === 'no-speech') {
-        console.warn('No speech detected, restarting...');
-        setTimeout(() => {
-          if (this.isListening && !this.isPaused) {
-            this.startRecognition();
-          }
-        }, 1000);
-      }
-    };
-
-    this.recognition.onend = () => {
-      console.log('Speech recognition ended');
-      
-      // Only auto-restart on desktop and if not paused
-      if (!this.isMobile && this.isListening && !this.isPaused && !this.isProcessing) {
-        setTimeout(() => {
-          this.startRecognition();
-        }, 100);
-      }
-    };
-  }
-
-  private startRecognition(): void {
-    if (!this.recognition || this.isPaused || this.isProcessing) return;
-
-    try {
-      this.recognition.start();
-    } catch (error) {
-      console.error('Error starting recognition:', error);
-    }
+    console.log('AudioProcessor initialized for OpenAI Whisper');
   }
 
   async startContinuousStreaming(
@@ -133,80 +26,270 @@ export class AudioProcessor {
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
 
-    if (!this.recognition) {
-      throw new Error('Speech recognition not available');
-    }
-
     try {
-      this.isListening = true;
+      // Request microphone access
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000, // Optimal for Whisper
+        }
+      });
+
       this.isPaused = false;
       this.isProcessing = false;
-      this.lastTranscript = '';
       
-      this.startRecognition();
-      console.log('Started speech recognition for:', this.isMobile ? 'Mobile' : 'Desktop');
+      await this.startRecording();
+      console.log('Started continuous audio streaming for Whisper');
     } catch (error) {
-      console.error('Error starting speech recognition:', error);
-      throw new Error('Failed to start speech recognition');
+      console.error('Error accessing microphone:', error);
+      throw new Error('Failed to access microphone. Please check permissions.');
+    }
+  }
+
+  private async startRecording(): Promise<void> {
+    if (!this.stream || this.isPaused || this.isProcessing) return;
+
+    try {
+      // Clear any existing chunks
+      this.audioChunks = [];
+
+      // Create MediaRecorder with optimal settings for Whisper
+      const options: MediaRecorderOptions = {
+        mimeType: 'audio/webm;codecs=opus', // Fallback to supported format
+      };
+
+      // Try different formats in order of preference
+      const supportedFormats = [
+        'audio/webm;codecs=opus',
+        'audio/mp4;codecs=mp4a.40.2',
+        'audio/webm',
+        'audio/mp4'
+      ];
+
+      for (const format of supportedFormats) {
+        if (MediaRecorder.isTypeSupported(format)) {
+          options.mimeType = format;
+          break;
+        }
+      }
+
+      this.mediaRecorder = new MediaRecorder(this.stream, options);
+      
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        await this.processRecording();
+      };
+
+      this.mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+      };
+
+      // Start recording
+      this.mediaRecorder.start(250); // Collect data every 250ms
+      this.isRecording = true;
+      this.onSpeechStartCallback?.();
+
+      // Set maximum recording time
+      this.recordingTimeout = setTimeout(() => {
+        this.stopCurrentRecording();
+      }, this.MAX_RECORDING_TIME) as unknown as number;
+
+      // Set silence detection timeout
+      this.resetSilenceTimeout();
+
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      throw error;
+    }
+  }
+
+  private resetSilenceTimeout(): void {
+    if (this.silenceTimeout) {
+      clearTimeout(this.silenceTimeout);
+    }
+
+    this.silenceTimeout = setTimeout(() => {
+      console.log('Silence detected, stopping recording');
+      this.stopCurrentRecording();
+    }, this.SILENCE_TIMEOUT) as unknown as number;
+  }
+
+  private stopCurrentRecording(): void {
+    if (!this.mediaRecorder || !this.isRecording) return;
+
+    try {
+      this.mediaRecorder.stop();
+      this.isRecording = false;
+
+      // Clear timeouts
+      if (this.recordingTimeout) {
+        clearTimeout(this.recordingTimeout);
+        this.recordingTimeout = null;
+      }
+      if (this.silenceTimeout) {
+        clearTimeout(this.silenceTimeout);
+        this.silenceTimeout = null;
+      }
+
+      console.log('Recording stopped');
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+    }
+  }
+
+  private async processRecording(): Promise<void> {
+    if (this.audioChunks.length === 0 || this.isProcessing) return;
+
+    this.isProcessing = true;
+
+    try {
+      // Create audio blob
+      const audioBlob = new Blob(this.audioChunks, { 
+        type: this.mediaRecorder?.mimeType || 'audio/webm' 
+      });
+
+      // Check minimum duration (approximate)
+      if (audioBlob.size < 1000) { // Very small file, likely no speech
+        console.log('Recording too short, skipping transcription');
+        this.startNextRecording();
+        return;
+      }
+
+      console.log('Processing audio blob:', {
+        size: audioBlob.size,
+        type: audioBlob.type,
+        chunks: this.audioChunks.length
+      });
+
+      // Send to transcription
+      const transcript = await this.transcribeWithWhisper(audioBlob);
+      
+      if (transcript && transcript.trim()) {
+        console.log('Whisper transcript:', transcript);
+        this.onTranscriptUpdateCallback?.({
+          text: transcript.trim(),
+          final: true
+        });
+      } else {
+        console.log('No speech detected in audio');
+        this.startNextRecording();
+      }
+
+    } catch (error) {
+      console.error('Error processing recording:', error);
+      this.startNextRecording();
+    }
+  }
+
+  private async transcribeWithWhisper(audioBlob: Blob): Promise<string> {
+    try {
+      // Convert to the format expected by Whisper API
+      const audioFile = new File([audioBlob], 'audio.webm', {
+        type: audioBlob.type
+      });
+
+      // Call Netlify function for Whisper transcription
+      const formData = new FormData();
+      formData.append('audio', audioFile);
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'en');
+
+      const response = await fetch('/.netlify/functions/transcribe-audio', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Whisper API error:', response.status, errorText);
+        throw new Error(`Transcription failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result.text || '';
+
+    } catch (error) {
+      console.error('Whisper transcription error:', error);
+      throw error;
+    }
+  }
+
+  private startNextRecording(): void {
+    this.isProcessing = false;
+    
+    // Start next recording if not paused
+    if (!this.isPaused && this.stream) {
+      setTimeout(() => {
+        this.startRecording();
+      }, 500);
     }
   }
 
   pauseRecording(): void {
-    console.log('Pausing speech recognition...');
+    console.log('Pausing recording...');
     this.isPaused = true;
     
-    if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch (error) {
-        console.error('Error pausing recognition:', error);
-      }
+    if (this.isRecording) {
+      this.stopCurrentRecording();
     }
   }
 
   resumeRecording(): void {
-    console.log('Resuming speech recognition...');
+    console.log('Resuming recording...');
     this.isPaused = false;
     this.isProcessing = false;
     
-    if (this.isListening && !this.isProcessing) {
-      // On mobile, require user interaction to restart
-      if (this.isMobile) {
-        console.log('Mobile: Recognition will restart on next user interaction');
-      } else {
-        setTimeout(() => {
-          this.startRecognition();
-        }, 500);
-      }
-    }
-  }
-
-  // Add method for mobile to manually restart recognition
-  restartRecognition(): void {
-    if (this.isMobile && this.isListening && !this.isPaused && !this.isProcessing) {
-      this.startRecognition();
+    if (this.stream) {
+      setTimeout(() => {
+        this.startRecording();
+      }, 1000);
     }
   }
 
   stopContinuousStreaming(): void {
-    console.log('Stopping speech recognition...');
+    console.log('Stopping continuous streaming...');
     
-    this.isListening = false;
     this.isPaused = false;
     this.isProcessing = false;
-    this.lastTranscript = '';
     
-    if (this.transcriptTimeout) {
-      clearTimeout(this.transcriptTimeout);
-      this.transcriptTimeout = null;
+    // Stop current recording
+    if (this.isRecording) {
+      this.stopCurrentRecording();
     }
-    
-    if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch (error) {
-        console.error('Error stopping recognition:', error);
-      }
+
+    // Clear timeouts
+    if (this.recordingTimeout) {
+      clearTimeout(this.recordingTimeout);
+      this.recordingTimeout = null;
+    }
+    if (this.silenceTimeout) {
+      clearTimeout(this.silenceTimeout);
+      this.silenceTimeout = null;
+    }
+
+    // Stop media stream
+    if (this.stream) {
+      this.stream.getTracks().forEach(track => track.stop());
+      this.stream = null;
+    }
+
+    // Clear MediaRecorder
+    this.mediaRecorder = null;
+    this.audioChunks = [];
+    this.isRecording = false;
+  }
+
+  // Method for mobile to manually restart recognition (compatibility)
+  restartRecording(): void {
+    if (!this.isPaused && !this.isProcessing && this.stream) {
+      this.startRecording();
     }
   }
 }

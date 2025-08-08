@@ -67,13 +67,196 @@ export interface UserProfile {
   updated_at: string;
 }
 
+// Simplified configuration - only what we need for OpenAI + Eleven Labs
 export interface Config {
   voice_id: string;
   silence_threshold: number;
   max_duration: number;
-  transcription_method: string;
-  openrouter_api_key?: string;
-  eleven_labs_api_key?: string;
+  transcription_method: string; // Always 'whisper' now
   openai_api_key?: string;
-  assemblyai_api_key?: string;
+  eleven_labs_api_key?: string;
+}
+
+// OpenAI API types
+export interface OpenAIMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface OpenAIStreamChunk {
+  choices: Array<{
+    delta: {
+      content?: string;
+      role?: string;
+    };
+    finish_reason?: string;
+    index: number;
+  }>;
+  created: number;
+  id: string;
+  model: string;
+  object: string;
+}
+
+export interface OpenAIResponse {
+  choices: Array<{
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
+    index: number;
+  }>;
+  created: number;
+  id: string;
+  model: string;
+  object: string;
+  usage: {
+    completion_tokens: number;
+    prompt_tokens: number;
+    total_tokens: number;
+  };
+}
+
+// Whisper API types
+export interface WhisperResponse {
+  text: string;
+}
+
+// Eleven Labs API types
+export interface ElevenLabsVoice {
+  voice_id: string;
+  name: string;
+  samples: Array<{
+    sample_id: string;
+    file_name: string;
+    mime_type: string;
+    size_bytes: number;
+    hash: string;
+  }>;
+  category: string;
+  fine_tuning: {
+    model_id: string | null;
+    is_allowed_to_fine_tune: boolean;
+    finetuning_requested: boolean;
+    finetuning_state: string;
+    verification_attempts: Array<any>;
+    verification_failures: Array<string>;
+    verification_attempts_count: number;
+    slice_ids: Array<string> | null;
+  };
+  labels: Record<string, string>;
+  description: string;
+  preview_url: string;
+  available_for_tiers: Array<string>;
+  settings: {
+    stability: number;
+    similarity_boost: number;
+    style?: number;
+    use_speaker_boost?: boolean;
+  };
+  sharing: {
+    status: string;
+    history_item_sample_id: string | null;
+    original_voice_id: string | null;
+    public_owner_id: string | null;
+    liked_by_count: number;
+    cloned_by_count: number;
+    name: string;
+    description: string;
+    labels: Record<string, string>;
+    enabled_in_library: boolean;
+  };
+  high_quality_base_model_ids: Array<string>;
+}
+
+export interface ElevenLabsVoicesResponse {
+  voices: ElevenLabsVoice[];
+}
+
+// Error types
+export interface APIError {
+  error: string;
+  details?: string;
+  status?: number;
+}
+
+// Validation types
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  missing?: string[];
+}
+
+// Configuration validation
+export interface ConfigValidation {
+  valid: boolean;
+  missing: string[];
+}
+
+// Audio processing types
+export interface AudioChunk {
+  data: Blob;
+  timestamp: number;
+  duration: number;
+}
+
+export interface TranscriptionResult {
+  text: string;
+  final: boolean;
+  confidence?: number;
+}
+
+// Component prop types
+export interface AICompanionSetupResult {
+  companion: any; // EmotionalAICompanion instance
+  error: string | null;
+}
+
+// Mood types - standardized list
+export type UserMood = 
+  | 'excited'
+  | 'happy' 
+  | 'sad'
+  | 'stressed'
+  | 'calm'
+  | 'neutral'
+  | 'frustrated'
+  | 'tired'
+  | 'contemplative'
+  | 'confident';
+
+// Response streaming types
+export interface ResponseStreamChunk {
+  chunk: string;
+  isFinal: boolean;
+  fullResponse: string;
+  mood: string | null;
+}
+
+// Netlify function types
+export interface NetlifyFunctionResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+  isBase64Encoded?: boolean;
+}
+
+export interface TranscribeAudioRequest {
+  audio: File;
+  model: string;
+  language?: string;
+  response_format?: string;
+  temperature?: number;
+}
+
+export interface ChatCompletionRequest {
+  model: string;
+  messages: OpenAIMessage[];
+  max_tokens?: number;
+  temperature?: number;
+  stream?: boolean;
+  top_p?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
 }
