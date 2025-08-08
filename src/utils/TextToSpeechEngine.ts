@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { AudioProcessor } from './AudioProcessor';
 
 export class TextToSpeechEngine {
   private elevenLabsApiKey: string;
@@ -6,7 +7,7 @@ export class TextToSpeechEngine {
   private maxChars: number = 5000;
   private lastApiCall: number = 0;
   private minDelay: number = 1000;
-  private audioProcessor: any = null;
+  private audioProcessor: AudioProcessor | null = null;
   private onSpeakingStartCallback: (() => void) | null = null;
   private onSpeakingEndCallback: (() => void) | null = null;
 
@@ -21,7 +22,7 @@ export class TextToSpeechEngine {
   }
 
   // Add method to set audio processor reference
-  setAudioProcessor(processor: any) {
+  setAudioProcessor(processor: AudioProcessor) {
     this.audioProcessor = processor;
   }
 

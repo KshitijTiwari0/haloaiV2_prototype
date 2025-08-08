@@ -1,15 +1,16 @@
 import React, { useState, useCallback } from 'react';
-import { Mic, MicOff, User, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
 import BackgroundFX from './BackgroundFX';
 import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
 import { ConfigManager } from '../utils/ConfigManager';
 import { signOut } from '../lib/supabase';
+import { User } from '@supabase/supabase-js';
 
 interface MainPageProps {
   companion: EmotionalAICompanion;
   configManager: ConfigManager;
-  user: any;
+  user: User | null;
 }
 
 export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, user }) => {
@@ -120,7 +121,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       {/* Header */}
       <div className="absolute top-4 right-4 flex items-center space-x-4">
         <div className="flex items-center space-x-2 text-sm text-gray-200">
-          <User size={16} />
+          <UserIcon size={16} />
           <span>{user?.email}</span>
         </div>
         <button
