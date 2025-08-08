@@ -197,7 +197,7 @@ export class AudioProcessor {
 
       // Call Netlify function for Whisper transcription
       const formData = new FormData();
-      formData.append('audio', audioFile);
+      formData.append('file', audioFile);
       formData.append('model', 'whisper-1');
       formData.append('language', 'en');
 
