@@ -4,7 +4,7 @@ publish = "dist"
 
 [functions]
 directory = "netlify/functions"
-timeout = 30
+# timeout = 30  # This line caused the build error.
 memory = 1024
 
 [[redirects]]
