@@ -1,14 +1,17 @@
+import { SupportedLanguage } from '../types';
+
 export class AudioProcessor {
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
   private isRecording: boolean = false;
   private isPaused: boolean = false;
   private stream: MediaStream | null = null;
-  private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean }) => void) | null = null;
+  private onTranscriptUpdateCallback: ((transcript: { text: string; final: boolean; language?: string }) => void) | null = null;
   private onSpeechStartCallback: (() => void) | null = null;
   private recordingTimeout: number | null = null;
   private silenceTimeout: number | null = null;
   private isProcessing: boolean = false;
+  private currentLanguage: SupportedLanguage = 'auto'; // Default to auto-detect
 
   // Configuration
   private readonly MAX_RECORDING_TIME = 30000; // 30 seconds
@@ -16,15 +19,28 @@ export class AudioProcessor {
   private readonly MIN_RECORDING_TIME = 1000; // 1 second minimum
 
   constructor() {
-    console.log('AudioProcessor initialized for OpenAI Whisper');
+    console.log('AudioProcessor initialized for OpenAI Whisper with multi-language support');
+  }
+
+  // Set the language for transcription
+  setLanguage(language: SupportedLanguage): void {
+    this.currentLanguage = language;
+    console.log(`AudioProcessor language set to: ${language}`);
+  }
+
+  // Get current language setting
+  getCurrentLanguage(): SupportedLanguage {
+    return this.currentLanguage;
   }
 
   async startContinuousStreaming(
-    onTranscriptUpdate: (transcript: { text: string; final: boolean }) => void,
-    onSpeechStart: () => void
+    onTranscriptUpdate: (transcript: { text: string; final: boolean; language?: string }) => void,
+    onSpeechStart: () => void,
+    language: SupportedLanguage = 'auto'
   ): Promise<void> {
     this.onTranscriptUpdateCallback = onTranscriptUpdate;
     this.onSpeechStartCallback = onSpeechStart;
+    this.currentLanguage = language;
 
     try {
       // Request microphone access
@@ -40,7 +56,7 @@ export class AudioProcessor {
       this.isProcessing = false;
       
       await this.startRecording();
-      console.log('Started continuous audio streaming for Whisper');
+      console.log(`Started continuous audio streaming for Whisper (language: ${language})`);
     } catch (error) {
       console.error('Error accessing microphone:', error);
       throw new Error('Failed to access microphone. Please check permissions.');
@@ -165,17 +181,24 @@ export class AudioProcessor {
       console.log('Processing audio blob:', {
         size: audioBlob.size,
         type: audioBlob.type,
-        chunks: this.audioChunks.length
+        chunks: this.audioChunks.length,
+        language: this.currentLanguage
       });
 
-      // Send to transcription
-      const transcript = await this.transcribeWithWhisper(audioBlob);
+      // Send to transcription with language preference
+      const result = await this.transcribeWithWhisper(audioBlob);
       
-      if (transcript && transcript.trim()) {
-        console.log('Whisper transcript:', transcript);
+      if (result.text && result.text.trim()) {
+        console.log('Whisper transcript:', {
+          text: result.text,
+          detectedLanguage: result.language,
+          requestedLanguage: this.currentLanguage
+        });
+        
         this.onTranscriptUpdateCallback?.({
-          text: transcript.trim(),
-          final: true
+          text: result.text.trim(),
+          final: true,
+          language: result.language
         });
       } else {
         console.log('No speech detected in audio');
@@ -188,7 +211,7 @@ export class AudioProcessor {
     }
   }
 
-  private async transcribeWithWhisper(audioBlob: Blob): Promise<string> {
+  private async transcribeWithWhisper(audioBlob: Blob): Promise<{ text: string; language?: string }> {
     try {
       // Convert to the format expected by Whisper API
       const audioFile = new File([audioBlob], 'audio.webm', {
@@ -199,7 +222,9 @@ export class AudioProcessor {
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('model', 'whisper-1');
-      formData.append('language', 'en');
+      formData.append('language', this.currentLanguage); // Send current language preference
+
+      console.log(`Sending transcription request with language: ${this.currentLanguage}`);
 
       const response = await fetch('/.netlify/functions/transcribe-audio', {
         method: 'POST',
@@ -213,7 +238,12 @@ export class AudioProcessor {
       }
 
       const result = await response.json();
-      return result.text || '';
+      
+      // Return both text and detected language
+      return {
+        text: result.text || '',
+        language: result.language || this.currentLanguage
+      };
 
     } catch (error) {
       console.error('Whisper transcription error:', error);
@@ -291,5 +321,31 @@ export class AudioProcessor {
     if (!this.isPaused && !this.isProcessing && this.stream) {
       this.startRecording();
     }
+  }
+
+  // Get supported languages for display
+  getSupportedLanguages(): { code: SupportedLanguage; name: string }[] {
+    return [
+      { code: 'auto', name: 'Auto Detect' },
+      { code: 'en', name: 'English' },
+      { code: 'hi', name: 'हिन्दी (Hindi)' },
+      { code: 'ar', name: 'العربية (Arabic)' }
+    ];
+  }
+
+  // Check if a language is supported
+  isLanguageSupported(language: string): boolean {
+    return ['auto', 'en', 'hi', 'ar'].includes(language);
+  }
+
+  // Get language display name
+  getLanguageDisplayName(language: SupportedLanguage): string {
+    const names = {
+      'auto': 'Auto Detect',
+      'en': 'English',
+      'hi': 'हिन्दी (Hindi)',
+      'ar': 'العربية (Arabic)'
+    };
+    return names[language] || 'Unknown';
   }
 }

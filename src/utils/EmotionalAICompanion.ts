@@ -2,7 +2,7 @@ import { AudioProcessor } from './AudioProcessor';
 import { EmotionDetector } from './EmotionDetector';
 import { ResponseGenerator } from './ResponseGenerator';
 import { TextToSpeechEngine } from './TextToSpeechEngine';
-import { ConfigManager } from './ConfigManager';
+import { ConfigManager, SupportedLanguage } from './ConfigManager';
 import { Interaction, DatabaseInteraction } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -14,6 +14,7 @@ export class EmotionalAICompanion {
   private configManager: ConfigManager;
   private isCallActive: boolean = false;
   private currentUserId: string | null = null;
+  private currentLanguage: SupportedLanguage = 'auto';
   
   // Callback functions
   private onSpeechStartCallback: (() => void) | null = null;
@@ -22,6 +23,7 @@ export class EmotionalAICompanion {
   private onProcessingEndCallback: (() => void) | null = null;
   private onAISpeakingStartCallback: (() => void) | null = null;
   private onAISpeakingEndCallback: (() => void) | null = null;
+  private onLanguageDetectedCallback: ((language: string) => void) | null = null;
 
   constructor(openaiApiKey: string, elevenLabsApiKey: string, configManager: ConfigManager) {
     this.configManager = configManager;
@@ -38,14 +40,20 @@ export class EmotionalAICompanion {
     this.configManager.set('openai_api_key', openaiApiKey);
     this.configManager.set('eleven_labs_api_key', elevenLabsApiKey);
 
+    // Get current language setting
+    this.currentLanguage = this.configManager.getCurrentLanguage();
+
     // Initialize components
     this.audioProcessor = new AudioProcessor();
     this.emotionDetector = new EmotionDetector();
     this.responseGenerator = new ResponseGenerator(openaiApiKey);
     this.ttsEngine = new TextToSpeechEngine(
       elevenLabsApiKey,
-      configManager.get('voice_id') || "21m00Tcm4TlvDq8ikWAM"
+      configManager.get('voice_id') || configManager.getVoiceForLanguage(this.currentLanguage)
     );
+    
+    // Set initial language in audio processor
+    this.audioProcessor.setLanguage(this.currentLanguage);
     
     // Connect TTS engine with audio processor
     this.ttsEngine.setAudioProcessor(this.audioProcessor);
@@ -61,7 +69,7 @@ export class EmotionalAICompanion {
     
     this.initializeUser();
     
-    console.log('EmotionalAICompanion initialized with OpenAI + Eleven Labs');
+    console.log(`EmotionalAICompanion initialized with OpenAI + Eleven Labs (Language: ${this.currentLanguage})`);
   }
 
   private async initializeUser() {
@@ -70,6 +78,9 @@ export class EmotionalAICompanion {
       this.currentUserId = user?.id || null;
       if (this.currentUserId) {
         console.log('AI Companion initialized for user:', user?.email);
+        
+        // Load user's language preference from database
+        await this.loadUserLanguagePreference();
         
         // Validate API keys on initialization
         const validation = this.configManager.validateConfiguration();
@@ -82,35 +93,127 @@ export class EmotionalAICompanion {
     }
   }
 
+  // Load user's language preference from database
+  private async loadUserLanguagePreference(): Promise<void> {
+    if (!this.currentUserId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('language_preference')
+        .eq('user_id', this.currentUserId)
+        .single();
+
+      if (data?.language_preference && !error) {
+        const savedLanguage = data.language_preference as SupportedLanguage;
+        this.setLanguage(savedLanguage);
+        console.log(`Loaded user language preference: ${savedLanguage}`);
+      }
+    } catch (error) {
+      console.error('Error loading user language preference:', error);
+    }
+  }
+
+  // Save user's language preference to database
+  private async saveUserLanguagePreference(language: SupportedLanguage): Promise<void> {
+    if (!this.currentUserId) return;
+
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: this.currentUserId,
+          language_preference: language,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Error saving language preference:', error);
+      } else {
+        console.log(`Saved language preference: ${language}`);
+      }
+    } catch (error) {
+      console.error('Exception saving language preference:', error);
+    }
+  }
+
+  // Set language for the entire system
+  public setLanguage(language: SupportedLanguage): void {
+    this.currentLanguage = language;
+    
+    // Update all components
+    this.configManager.setLanguage(language);
+    this.audioProcessor.setLanguage(language);
+    
+    // Update voice for TTS
+    const voiceId = this.configManager.getVoiceForLanguage(language);
+    this.ttsEngine.setVoiceId(voiceId);
+    
+    // Save to database
+    this.saveUserLanguagePreference(language);
+    
+    console.log(`Language changed to: ${language}, Voice: ${voiceId}`);
+  }
+
+  // Get current language
+  public getCurrentLanguage(): SupportedLanguage {
+    return this.currentLanguage;
+  }
+
+  // Get supported languages
+  public getSupportedLanguages(): { code: SupportedLanguage; name: string; rtl: boolean }[] {
+    return this.configManager.getSupportedLanguages();
+  }
+
   // Existing callback setters
   public setOnSpeechStart(callback: () => void) { this.onSpeechStartCallback = callback; }
   public setOnSpeechEnd(callback: () => void) { this.onSpeechEndCallback = callback; }
   public setOnProcessingStart(callback: () => void) { this.onProcessingStartCallback = callback; }
   public setOnProcessingEnd(callback: () => void) { this.onProcessingEndCallback = callback; }
-  
-  // New callback setters for AI speaking
   public setOnAISpeakingStart(callback: () => void) { this.onAISpeakingStartCallback = callback; }
   public setOnAISpeakingEnd(callback: () => void) { this.onAISpeakingEndCallback = callback; }
+  
+  // New callback for language detection
+  public setOnLanguageDetected(callback: (language: string) => void) { this.onLanguageDetectedCallback = callback; }
 
-  private async onTranscriptUpdate(transcript: { text: string; final: boolean }): Promise<void> {
+  private async onTranscriptUpdate(transcript: { text: string; final: boolean; language?: string }): Promise<void> {
     if (!transcript.final || !transcript.text.trim()) return;
     
-    console.log('Final User Transcript:', transcript.text);
+    console.log('Final User Transcript:', {
+      text: transcript.text,
+      detectedLanguage: transcript.language,
+      currentLanguage: this.currentLanguage
+    });
+
+    // Handle language detection and auto-switching
+    if (transcript.language && transcript.language !== this.currentLanguage) {
+      if (this.currentLanguage === 'auto') {
+        // Auto-switch to detected language
+        this.setLanguage(transcript.language as SupportedLanguage);
+        this.onLanguageDetectedCallback?.(transcript.language);
+        console.log(`Auto-switched to detected language: ${transcript.language}`);
+      } else {
+        // Notify about detected language but don't switch
+        this.onLanguageDetectedCallback?.(transcript.language);
+        console.log(`Detected language (${transcript.language}) differs from current (${this.currentLanguage})`);
+      }
+    }
+
     this.onSpeechEndCallback?.(); // User finished speaking
     this.onProcessingStartCallback?.(); // Start processing
     
     try {
-      // Since we're using Whisper now, we don't have real-time audio features
-      // We'll provide a simple description based on the transcript
-      const featureDescription = this.generateFeatureDescriptionFromText(transcript.text);
+      // Generate feature description from text (enhanced for multilingual)
+      const featureDescription = this.generateFeatureDescriptionFromText(transcript.text, transcript.language);
       
-      await this.processAndRespond(transcript.text, featureDescription);
+      await this.processAndRespond(transcript.text, featureDescription, transcript.language);
     } catch (error) {
       console.error('Error processing transcript:', error);
       
-      // Provide fallback response for errors
+      // Provide fallback response in appropriate language
       try {
-        await this.ttsEngine.speakText("I'm having trouble understanding. Could you please try again?");
+        const fallbackText = this.getFallbackText('processing_error');
+        await this.ttsEngine.speakText(fallbackText, true, transcript.language);
       } catch (ttsError) {
         console.error('Error with fallback TTS:', ttsError);
       }
@@ -119,14 +222,28 @@ export class EmotionalAICompanion {
     }
   }
 
-  private generateFeatureDescriptionFromText(text: string): string {
-    // Simple text analysis to provide context for the AI
+  private generateFeatureDescriptionFromText(text: string, detectedLanguage?: string): string {
+    // Enhanced text analysis with language awareness
     const wordCount = text.split(' ').length;
-    const hasQuestionMarks = text.includes('?');
+    const hasQuestionMarks = text.includes('?') || text.includes('؟'); // Arabic question mark
     const hasExclamations = text.includes('!');
     const allCaps = text === text.toUpperCase() && text.length > 5;
     
+    // Language-specific patterns
+    const arabicPattern = /[\u0600-\u06FF]/;
+    const hindiPattern = /[\u0900-\u097F]/;
+    
     let description = `Text analysis: ${wordCount} words`;
+    
+    if (detectedLanguage) {
+      description += `, detected language: ${detectedLanguage}`;
+    }
+    
+    if (arabicPattern.test(text)) {
+      description += ", Arabic script detected";
+    } else if (hindiPattern.test(text)) {
+      description += ", Devanagari script detected";
+    }
     
     if (hasQuestionMarks) description += ", questioning tone";
     if (hasExclamations) description += ", excited/emphatic tone";
@@ -136,54 +253,85 @@ export class EmotionalAICompanion {
     
     return description;
   }
+
+  private getFallbackText(type: 'processing_error' | 'understanding_error'): string {
+    const fallbacks = {
+      'processing_error': {
+        'en': "I'm having trouble understanding. Could you please try again?",
+        'hi': "मुझे समझने में परेशानी हो रही है। क्या आप फिर से कोशिश कर सकते हैं?",
+        'ar': "أواجه صعوبة في الفهم. هل يمكنك المحاولة مرة أخرى؟"
+      },
+      'understanding_error': {
+        'en': "I'm not sure how to respond to that. Could you tell me more?",
+        'hi': "मुझे यकीन नहीं है कि इसका जवाब कैसे दूं। क्या आप मुझे और बता सकते हैं?",
+        'ar': "لست متأكدا من كيفية الرد على ذلك. هل يمكنك إخباري المزيد؟"
+      }
+    };
+    
+    const languageKey = this.currentLanguage === 'auto' ? 'en' : this.currentLanguage;
+    return fallbacks[type][languageKey as keyof typeof fallbacks[typeof type]] || fallbacks[type]['en'];
+  }
   
-  private async processAndRespond(transcribedText: string, featureDescription: string): Promise<void> {
+  private async processAndRespond(transcribedText: string, featureDescription: string, detectedLanguage?: string): Promise<void> {
     const startTime = Date.now();
     
     try {
       // Get recent conversation history
       const recentInteractions = await this.getRecentInteractions();
       
-      // Generate response using streaming
+      // Determine response language
+      const responseLanguage = detectedLanguage || this.currentLanguage;
+      
+      // Generate response using streaming with language context
       const responseStream = this.responseGenerator.generateResponseStream(
         transcribedText, 
         featureDescription, 
-        recentInteractions
+        recentInteractions,
+        {},
+        responseLanguage as SupportedLanguage
       );
 
       let fullAIResponse = "";
       let finalMood: string | null = null;
+      let finalLanguage: string | null = null;
 
       // Process streaming response
       for await (const result of responseStream) {
         if (result.isFinal) {
           fullAIResponse = result.fullResponse;
           finalMood = result.mood;
+          finalLanguage = result.language;
         }
       }
       
       if (fullAIResponse && fullAIResponse.trim()) {
-        console.log('AI response:', fullAIResponse);
+        console.log('AI response:', {
+          text: fullAIResponse,
+          mood: finalMood,
+          language: finalLanguage
+        });
         
-        // Speak the response
-        await this.ttsEngine.speakText(fullAIResponse);
+        // Speak the response with appropriate voice
+        await this.ttsEngine.speakText(fullAIResponse, true, finalLanguage || detectedLanguage);
         console.log('AI finished speaking');
 
-        // Save interaction to database
+        // Save interaction to database with language information
         const interaction: Interaction = {
           timestamp: new Date().toISOString(),
           user_input: transcribedText,
           feature_description: featureDescription,
           ai_response: fullAIResponse,
           response_time: (Date.now() - startTime) / 1000,
-          user_mood: finalMood || 'neutral'
+          user_mood: finalMood || 'neutral',
+          language: finalLanguage || detectedLanguage || this.currentLanguage
         };
         
         await this.saveInteraction(interaction);
       } else {
         console.warn('No response generated from AI');
         // Provide fallback response
-        await this.ttsEngine.speakText("I'm not sure how to respond to that. Could you tell me more?");
+        const fallbackText = this.getFallbackText('understanding_error');
+        await this.ttsEngine.speakText(fallbackText, true, detectedLanguage);
       }
       
     } catch (error) {
@@ -191,7 +339,8 @@ export class EmotionalAICompanion {
       
       // Provide error fallback
       try {
-        await this.ttsEngine.speakText("I'm having some technical difficulties. Please try again in a moment.");
+        const fallbackText = this.getFallbackText('processing_error');
+        await this.ttsEngine.speakText(fallbackText, true, detectedLanguage);
       } catch (ttsError) {
         console.error('Error with error fallback TTS:', ttsError);
       }
@@ -212,12 +361,13 @@ export class EmotionalAICompanion {
       }
 
       this.isCallActive = true;
-      console.log('Starting call...');
+      console.log(`Starting call with language: ${this.currentLanguage}...`);
       
-      // Start audio processing with Whisper
+      // Start audio processing with current language setting
       await this.audioProcessor.startContinuousStreaming(
         this.onTranscriptUpdate.bind(this),
-        () => this.onSpeechStartCallback?.()
+        () => this.onSpeechStartCallback?.(),
+        this.currentLanguage
       );
       
       console.log('Call started successfully');
@@ -262,12 +412,13 @@ export class EmotionalAICompanion {
         feature_description: interaction.feature_description,
         response_time: interaction.response_time,
         user_mood: interaction.user_mood,
+        language_used: interaction.language, // Store the language used
       }]);
 
       if (error) {
         console.error('Error saving interaction:', error);
       } else {
-        console.log('Interaction saved successfully');
+        console.log('Interaction saved successfully with language:', interaction.language);
       }
     } catch (error) {
       console.error('Exception saving interaction:', error);
@@ -338,10 +489,14 @@ export class EmotionalAICompanion {
   }
 
   public getConfigSummary(): Record<string, any> {
-    return this.configManager.getConfigSummary();
+    return {
+      ...this.configManager.getConfigSummary(),
+      currentLanguage: this.currentLanguage,
+      isRTL: this.configManager.isRTL()
+    };
   }
 
-  // Voice management
+  // Voice management with language support
   public async getAvailableVoices(): Promise<any[]> {
     return await this.ttsEngine.getAvailableVoices();
   }
@@ -351,7 +506,34 @@ export class EmotionalAICompanion {
     this.configManager.set('voice_id', voiceId);
   }
 
+  public setVoiceForLanguage(language: SupportedLanguage, voiceId: string): void {
+    this.ttsEngine.setVoiceForLanguage(language, voiceId);
+    this.configManager.set('voice_mapping', {
+      ...this.configManager.get('voice_mapping'),
+      [language]: voiceId
+    });
+  }
+
   public getCurrentVoiceId(): string {
     return this.ttsEngine.getVoiceId();
+  }
+
+  public getVoiceMappings(): Record<string, string> {
+    return this.ttsEngine.getVoiceMappings();
+  }
+
+  // Test voice for specific language
+  public async testVoice(language: SupportedLanguage): Promise<void> {
+    await this.ttsEngine.testVoice(language);
+  }
+
+  // Check if current language uses RTL
+  public isRTL(): boolean {
+    return this.configManager.isRTL();
+  }
+
+  // Get language display name
+  public getLanguageDisplayName(language: SupportedLanguage): string {
+    return this.configManager.getLanguageDisplayName(language);
   }
 }

@@ -40,6 +40,7 @@ export interface Interaction {
   ai_response: string;
   response_time: number;
   user_mood?: string;
+  language?: string; // Added for multi-language support
 }
 
 export interface LLMResponse {
@@ -57,22 +58,38 @@ export interface DatabaseInteraction {
   response_time: number;
   created_at: string;
   user_mood: string | null;
+  language_used: string | null; // Added for multi-language support
 }
 
 export interface UserProfile {
   id: string;
   user_id: string;
   preferences: Record<string, any>;
+  language_preference: string; // Added for multi-language support
   created_at: string;
   updated_at: string;
 }
 
-// Simplified configuration - only what we need for OpenAI + Eleven Labs
+// Multi-language support types
+export type SupportedLanguage = 'en' | 'hi' | 'ar' | 'auto';
+
+export interface LanguageConfig {
+  code: SupportedLanguage;
+  name: string;
+  nativeName: string;
+  rtl: boolean;
+  voiceId: string;
+}
+
+// Updated configuration with multi-language support
 export interface Config {
   voice_id: string;
   silence_threshold: number;
   max_duration: number;
-  transcription_method: string; // Always 'whisper' now
+  transcription_method: string;
+  language: SupportedLanguage; // Added
+  voice_mapping: Record<string, string>; // Added
+  rtl_support: boolean; // Added
   openai_api_key?: string;
   eleven_labs_api_key?: string;
 }
@@ -118,9 +135,18 @@ export interface OpenAIResponse {
   };
 }
 
-// Whisper API types
+// Whisper API types with language support
 export interface WhisperResponse {
   text: string;
+  language?: string; // Added - detected language
+}
+
+export interface WhisperRequest {
+  file: File;
+  model: string;
+  language?: string; // Added - can specify language or 'auto'
+  response_format?: string;
+  temperature?: number;
 }
 
 // Eleven Labs API types
@@ -205,6 +231,7 @@ export interface TranscriptionResult {
   text: string;
   final: boolean;
   confidence?: number;
+  language?: string; // Added for detected language
 }
 
 // Component prop types
@@ -226,12 +253,13 @@ export type UserMood =
   | 'contemplative'
   | 'confident';
 
-// Response streaming types
+// Response streaming types with language
 export interface ResponseStreamChunk {
   chunk: string;
   isFinal: boolean;
   fullResponse: string;
   mood: string | null;
+  language?: string; // Added
 }
 
 // Netlify function types
@@ -245,7 +273,7 @@ export interface NetlifyFunctionResponse {
 export interface TranscribeAudioRequest {
   audio: File;
   model: string;
-  language?: string;
+  language?: string; // Added - can be specific language or 'auto'
   response_format?: string;
   temperature?: number;
 }
@@ -259,4 +287,5 @@ export interface ChatCompletionRequest {
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  language?: string; // Added for language context
 }

@@ -1,4 +1,4 @@
-import { DatabaseInteraction } from '../types';
+import { DatabaseInteraction, SupportedLanguage } from '../types';
 
 export class ResponseGenerator {
   private apiKey: string;
@@ -11,31 +11,44 @@ export class ResponseGenerator {
     this.baseUrl = "https://api.openai.com/v1/chat/completions";
   }
 
-  // This is now an async generator to stream the response
-  async * generateResponseStream(
-    transcribedText: string, 
-    featureDescription: string,
-    conversationHistory: DatabaseInteraction[] = [],
-    userPreferences: Record<string, any> = {}
-  ): AsyncGenerator<{ chunk: string; isFinal: boolean; fullResponse: string; mood: string | null }> {
-    let fullResponse = "";
-    let detectedMood: string | null = null;
-    
-    try {
-      const historyContext = conversationHistory.length > 0 
-        ? "\n\nRecent conversation history (oldest first):\n" + 
-          conversationHistory.reverse().map(i => `User: ${i.user_input}\nAI: ${i.ai_response}`).join('\n\n')
-        : '';
-        
-      const systemPrompt = `You are a supportive and empathetic friend. Your goal is to make the user feel heard and understood.
+  // Enhanced system prompts for different languages
+  private getSystemPrompt(language: SupportedLanguage, transcribedText: string, featureDescription: string, historyContext: string): string {
+    const languageInstructions = {
+      'en': {
+        instruction: 'Respond in English.',
+        example: '{"ai_response": "That sounds like a lot to deal with. I\'m here to listen.", "user_mood": "stressed"}'
+      },
+      'hi': {
+        instruction: 'Respond in Hindi (हिन्दी). Use Devanagari script.',
+        example: '{"ai_response": "यह बहुत कठिन लग रहा है। मैं आपकी बात सुनने के लिए यहाँ हूँ।", "user_mood": "stressed"}'
+      },
+      'ar': {
+        instruction: 'Respond in Arabic (العربية). Use proper Arabic script and grammar.',
+        example: '{"ai_response": "يبدو أن هذا أمر صعب للغاية. أنا هنا للاستماع إليك.", "user_mood": "stressed"}'
+      },
+      'auto': {
+        instruction: 'Detect the language of the user input and respond in the same language.',
+        example: '{"ai_response": "I understand what you\'re going through. I\'m here for you.", "user_mood": "stressed"}'
+      }
+    };
+
+    const langConfig = languageInstructions[language] || languageInstructions['en'];
+
+    return `You are a supportive and empathetic friend. Your goal is to make the user feel heard and understood.
+
+LANGUAGE INSTRUCTION: ${langConfig.instruction}
+
+Guidelines:
 - Listen carefully to what the user says and respond with empathy and understanding.
 - Avoid repetitive phrases. Do not constantly prompt the user to speak.
 - Your responses should encourage a natural, human-like conversation.
 - Act as a companion, not an interrogator.
 - Keep your responses concise (1-2 sentences).
+- Be culturally sensitive and appropriate for the language context.
 
 You MUST respond with a JSON object containing 'ai_response' and 'user_mood'.
-Example: {"ai_response": "That sounds like a lot to deal with. I'm here to listen.", "user_mood": "stressed"}
+Example: ${langConfig.example}
+
 Valid moods: excited, happy, sad, stressed, calm, neutral, frustrated, tired, contemplative, confident.
 
 Analyze the user's words, voice traits, and conversation history to inform your response.
@@ -43,7 +56,30 @@ Analyze the user's words, voice traits, and conversation history to inform your 
 ${historyContext}
 User said: '${transcribedText}'. Voice traits: ${featureDescription}.
 ---
-Respond with ONLY the valid JSON object.`;
+Respond with ONLY the valid JSON object in the specified language.`;
+  }
+
+  // This is now an async generator to stream the response
+  async * generateResponseStream(
+    transcribedText: string, 
+    featureDescription: string,
+    conversationHistory: DatabaseInteraction[] = [],
+    userPreferences: Record<string, any> = {},
+    language: SupportedLanguage = 'auto'
+  ): AsyncGenerator<{ chunk: string; isFinal: boolean; fullResponse: string; mood: string | null; language: string | null }> {
+    let fullResponse = "";
+    let detectedMood: string | null = null;
+    let responseLanguage: string | null = language === 'auto' ? null : language;
+    
+    try {
+      const historyContext = conversationHistory.length > 0 
+        ? "\n\nRecent conversation history (oldest first):\n" + 
+          conversationHistory.reverse().map(i => `User: ${i.user_input}\nAI: ${i.ai_response}`).join('\n\n')
+        : '';
+        
+      const systemPrompt = this.getSystemPrompt(language, transcribedText, featureDescription, historyContext);
+
+      console.log(`Generating response in language: ${language}`);
 
       // Use Netlify function for secure API calls
       const response = await fetch('/.netlify/functions/chat-completion', {
@@ -88,7 +124,7 @@ Respond with ONLY the valid JSON object.`;
               const content = parsed.choices[0]?.delta?.content;
               if (content) {
                 fullResponse += content;
-                yield { chunk: content, isFinal: false, fullResponse: "", mood: null };
+                yield { chunk: content, isFinal: false, fullResponse: "", mood: null, language: responseLanguage };
               }
             } catch (parseError) {
               // Skip invalid JSON chunks
@@ -103,6 +139,12 @@ Respond with ONLY the valid JSON object.`;
         const finalJson = JSON.parse(fullResponse);
         detectedMood = finalJson.user_mood || 'neutral';
         fullResponse = finalJson.ai_response || fullResponse; // Use the parsed response text
+        
+        // If language was auto, try to detect the response language
+        if (language === 'auto' && !responseLanguage) {
+          responseLanguage = this.detectResponseLanguage(fullResponse);
+        }
+        
       } catch (e) {
         console.error("Could not parse final JSON from stream, using raw response.", fullResponse);
         detectedMood = 'neutral'; // Fallback mood
@@ -114,6 +156,10 @@ Respond with ONLY the valid JSON object.`;
             const extractedJson = JSON.parse(jsonMatch[0]);
             detectedMood = extractedJson.user_mood || 'neutral';
             fullResponse = extractedJson.ai_response || fullResponse;
+            
+            if (language === 'auto' && !responseLanguage) {
+              responseLanguage = this.detectResponseLanguage(fullResponse);
+            }
           } catch (extractError) {
             // Use raw response as fallback
             console.warn("Could not extract JSON, using raw response");
@@ -123,13 +169,38 @@ Respond with ONLY the valid JSON object.`;
       
     } catch (error) {
       console.error('Response generation stream error:', error);
-      fullResponse = "I'm having a little trouble thinking right now. Could you say that again?";
+      
+      // Provide fallback responses in appropriate language
+      const fallbackResponses = {
+        'en': "I'm having a little trouble thinking right now. Could you say that again?",
+        'hi': "मुझे अभी सोचने में थोड़ी परेशानी हो रही है। क्या आप फिर से कह सकते हैं?",
+        'ar': "أواجه صعوبة قليلة في التفكير الآن. هل يمكنك أن تقول ذلك مرة أخرى؟"
+      };
+      
+      fullResponse = fallbackResponses[language as keyof typeof fallbackResponses] || fallbackResponses['en'];
       detectedMood = "neutral";
+      responseLanguage = language === 'auto' ? 'en' : language;
+      
       // Yield the error message as a single chunk
-      yield { chunk: fullResponse, isFinal: false, fullResponse: "", mood: null };
+      yield { chunk: fullResponse, isFinal: false, fullResponse: "", mood: null, language: responseLanguage };
     } finally {
       // Yield a final object containing the complete message and the detected mood
-      yield { chunk: "", isFinal: true, fullResponse, mood: detectedMood };
+      yield { chunk: "", isFinal: true, fullResponse, mood: detectedMood, language: responseLanguage };
+    }
+  }
+
+  // Helper method to detect response language
+  private detectResponseLanguage(text: string): string {
+    // Simple heuristic-based language detection
+    const arabicPattern = /[\u0600-\u06FF]/;
+    const hindiPattern = /[\u0900-\u097F]/;
+    
+    if (arabicPattern.test(text)) {
+      return 'ar';
+    } else if (hindiPattern.test(text)) {
+      return 'hi';
+    } else {
+      return 'en';
     }
   }
 
@@ -138,31 +209,16 @@ Respond with ONLY the valid JSON object.`;
     transcribedText: string, 
     featureDescription: string,
     conversationHistory: DatabaseInteraction[] = [],
-    userPreferences: Record<string, any> = {}
-  ): Promise<{ ai_response: string; user_mood: string }> {
+    userPreferences: Record<string, any> = {},
+    language: SupportedLanguage = 'auto'
+  ): Promise<{ ai_response: string; user_mood: string; language: string }> {
     try {
       const historyContext = conversationHistory.length > 0 
         ? "\n\nRecent conversation history (oldest first):\n" + 
           conversationHistory.reverse().map(i => `User: ${i.user_input}\nAI: ${i.ai_response}`).join('\n\n')
         : '';
         
-      const systemPrompt = `You are a supportive and empathetic friend. Your goal is to make the user feel heard and understood.
-- Listen carefully to what the user says and respond with empathy and understanding.
-- Avoid repetitive phrases. Do not constantly prompt the user to speak.
-- Your responses should encourage a natural, human-like conversation.
-- Act as a companion, not an interrogator.
-- Keep your responses concise (1-2 sentences).
-
-You MUST respond with a JSON object containing 'ai_response' and 'user_mood'.
-Example: {"ai_response": "That sounds like a lot to deal with. I'm here to listen.", "user_mood": "stressed"}
-Valid moods: excited, happy, sad, stressed, calm, neutral, frustrated, tired, contemplative, confident.
-
-Analyze the user's words, voice traits, and conversation history to inform your response.
----
-${historyContext}
-User said: '${transcribedText}'. Voice traits: ${featureDescription}.
----
-Respond with ONLY the valid JSON object.`;
+      const systemPrompt = this.getSystemPrompt(language, transcribedText, featureDescription, historyContext);
 
       const response = await fetch('/.netlify/functions/chat-completion', {
         method: 'POST',
@@ -192,23 +248,44 @@ Respond with ONLY the valid JSON object.`;
       // Parse the JSON response
       try {
         const parsed = JSON.parse(content);
+        const responseLanguage = language === 'auto' 
+          ? this.detectResponseLanguage(parsed.ai_response || content)
+          : language;
+          
         return {
           ai_response: parsed.ai_response || content,
-          user_mood: parsed.user_mood || 'neutral'
+          user_mood: parsed.user_mood || 'neutral',
+          language: responseLanguage
         };
       } catch (parseError) {
         console.error('Error parsing OpenAI JSON response:', parseError);
+        const responseLanguage = language === 'auto' 
+          ? this.detectResponseLanguage(content)
+          : language;
+          
         return {
           ai_response: content,
-          user_mood: 'neutral'
+          user_mood: 'neutral',
+          language: responseLanguage
         };
       }
 
     } catch (error) {
       console.error('Error generating response:', error);
+      
+      const fallbackResponses = {
+        'en': "I'm having trouble understanding right now. Could you try again?",
+        'hi': "मुझे अभी समझने में परेशानी हो रही है। क्या आप फिर से कोशिश कर सकते हैं?",
+        'ar': "أواجه صعوبة في الفهم الآن. هل يمكنك المحاولة مرة أخرى؟"
+      };
+      
+      const fallbackResponse = fallbackResponses[language as keyof typeof fallbackResponses] || fallbackResponses['en'];
+      const responseLanguage = language === 'auto' ? 'en' : language;
+      
       return {
-        ai_response: "I'm having trouble understanding right now. Could you try again?",
-        user_mood: 'neutral'
+        ai_response: fallbackResponse,
+        user_mood: 'neutral',
+        language: responseLanguage
       };
     }
   }

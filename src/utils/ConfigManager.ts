@@ -1,15 +1,27 @@
 import { Config } from '../types';
 
+export type SupportedLanguage = 'en' | 'hi' | 'ar' | 'auto';
+
 export class ConfigManager {
   private config: Config;
   private readonly configKey = 'emotional-ai-config';
 
+  // Voice mapping for different languages
+  private readonly voiceMapping = {
+    'en': '21m00Tcm4TlvDq8ikWAM', // Default English voice
+    'hi': 'yRis6UiS4dtT4Aqv72DC', // Ranbir M - Deep, Engaging Hindi Voice
+    'ar': 'tavIIPLplRB883FzWU0V'  // Mona - Middle-aged Female with Arabic Modern Standard accent
+  };
+
   constructor() {
     this.config = {
-      voice_id: "21m00Tcm4TlvDq8ikWAM", // Default Eleven Labs voice
+      voice_id: this.voiceMapping.en,
       silence_threshold: 0.01,
-      max_duration: 30, // Increased for Whisper
-      transcription_method: "whisper" // Only Whisper now
+      max_duration: 30,
+      transcription_method: "whisper",
+      language: 'auto' as SupportedLanguage,
+      voice_mapping: this.voiceMapping,
+      rtl_support: false
     };
     this.loadConfig();
   }
@@ -19,7 +31,12 @@ export class ConfigManager {
       const stored = localStorage.getItem(this.configKey);
       if (stored) {
         const parsedConfig = JSON.parse(stored);
-        this.config = { ...this.config, ...parsedConfig };
+        this.config = { 
+          ...this.config, 
+          ...parsedConfig,
+          // Ensure voice mapping is always up to date
+          voice_mapping: this.voiceMapping
+        };
         console.log('Config loaded from localStorage');
       }
     } catch (error) {
@@ -48,11 +65,69 @@ export class ConfigManager {
 
   set<K extends keyof Config>(key: K, value: Config[K]): void {
     this.config[key] = value;
+    
+    // Auto-update voice_id when language changes
+    if (key === 'language' && value !== 'auto') {
+      const voiceId = this.voiceMapping[value as keyof typeof this.voiceMapping];
+      if (voiceId) {
+        this.config.voice_id = voiceId;
+        this.config.rtl_support = value === 'ar';
+      }
+    }
+    
     this.saveConfig();
   }
 
   getAll(): Config {
     return { ...this.config };
+  }
+
+  // Get voice ID for specific language
+  getVoiceForLanguage(language: SupportedLanguage): string {
+    if (language === 'auto') {
+      return this.voiceMapping.en; // Default to English
+    }
+    return this.voiceMapping[language] || this.voiceMapping.en;
+  }
+
+  // Set language and auto-update voice
+  setLanguage(language: SupportedLanguage): void {
+    this.set('language', language);
+    const voiceId = this.getVoiceForLanguage(language);
+    this.set('voice_id', voiceId);
+    this.set('rtl_support', language === 'ar');
+    console.log(`Language set to: ${language}, Voice: ${voiceId}, RTL: ${language === 'ar'}`);
+  }
+
+  // Get current language
+  getCurrentLanguage(): SupportedLanguage {
+    return (this.config.language as SupportedLanguage) || 'auto';
+  }
+
+  // Check if current language uses RTL
+  isRTL(): boolean {
+    return this.config.rtl_support || false;
+  }
+
+  // Get language display name
+  getLanguageDisplayName(language: SupportedLanguage): string {
+    const names = {
+      'en': 'English',
+      'hi': 'हिन्दी (Hindi)',
+      'ar': 'العربية (Arabic)',
+      'auto': 'Auto Detect'
+    };
+    return names[language] || 'Unknown';
+  }
+
+  // Get supported languages
+  getSupportedLanguages(): { code: SupportedLanguage; name: string; rtl: boolean }[] {
+    return [
+      { code: 'auto', name: 'Auto Detect', rtl: false },
+      { code: 'en', name: 'English', rtl: false },
+      { code: 'hi', name: 'हिन्दी (Hindi)', rtl: false },
+      { code: 'ar', name: 'العربية (Arabic)', rtl: true }
+    ];
   }
 
   // Helper method to validate required API keys
@@ -80,8 +155,11 @@ export class ConfigManager {
       max_duration: this.config.max_duration,
       silence_threshold: this.config.silence_threshold,
       transcription_method: this.config.transcription_method,
+      language: this.config.language,
+      rtl_support: this.config.rtl_support,
       has_openai_key: !!this.config.openai_api_key,
-      has_eleven_labs_key: !!this.config.eleven_labs_api_key
+      has_eleven_labs_key: !!this.config.eleven_labs_api_key,
+      voice_mapping: this.config.voice_mapping
     };
   }
 
@@ -93,10 +171,13 @@ export class ConfigManager {
     };
 
     this.config = {
-      voice_id: "21m00Tcm4TlvDq8ikWAM",
+      voice_id: this.voiceMapping.en,
       silence_threshold: 0.01,
       max_duration: 30,
       transcription_method: "whisper",
+      language: 'auto' as SupportedLanguage,
+      voice_mapping: this.voiceMapping,
+      rtl_support: false,
       ...apiKeys
     };
 

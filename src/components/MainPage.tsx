@@ -1,9 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
 import BackgroundFX from './BackgroundFX';
+import { LanguageSelector } from './LanguageSelector';
 import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
-import { ConfigManager } from '../utils/ConfigManager';
+import { ConfigManager, SupportedLanguage } from '../utils/ConfigManager';
 import { signOut } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 
@@ -19,6 +20,16 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('auto');
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+  const [isRTL, setIsRTL] = useState(false);
+
+  // Initialize language state from companion
+  useEffect(() => {
+    const language = companion.getCurrentLanguage();
+    setCurrentLanguage(language);
+    setIsRTL(companion.isRTL());
+  }, [companion]);
 
   const handleSignOut = async () => {
     try {
@@ -27,6 +38,19 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       console.error('Sign out error:', error);
     }
   };
+
+  const handleLanguageChange = useCallback((language: SupportedLanguage) => {
+    companion.setLanguage(language);
+    setCurrentLanguage(language);
+    setIsRTL(companion.isRTL());
+    
+    // Clear detected language if switching to a specific language
+    if (language !== 'auto') {
+      setDetectedLanguage(null);
+    }
+    
+    console.log(`Language changed to: ${language}`);
+  }, [companion]);
 
   const handleStartCall = useCallback(async () => {
     if (isCallActive || isProcessing) return;
@@ -67,8 +91,14 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         console.log('AI speaking ended');
         setIsAISpeaking(false);
       });
+
+      // Setup language detection callback
+      companion.setOnLanguageDetected((language: string) => {
+        console.log('Language detected:', language);
+        setDetectedLanguage(language);
+      });
       
-      console.log('Starting call...');
+      console.log(`Starting call with language: ${currentLanguage}...`);
       await companion.startCall();
       console.log('Call started successfully');
 
@@ -77,7 +107,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setError(err instanceof Error ? err.message : 'An error occurred');
       setIsCallActive(false);
     }
-  }, [companion, isCallActive, isProcessing]);
+  }, [companion, isCallActive, isProcessing, currentLanguage]);
 
   const handleEndCall = useCallback(() => {
     if (!isCallActive) return;
@@ -88,6 +118,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsUserSpeaking(false);
       setIsProcessing(false);
       setIsAISpeaking(false);
+      setDetectedLanguage(null);
       setError(null);
       console.log('Call ended successfully');
     } catch (err) {
@@ -115,87 +146,133 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   };
 
   return (
-    <div className="relative min-h-screen text-white">
+    <div className={`relative min-h-screen text-white ${isRTL ? 'rtl' : 'ltr'}`}>
       <BackgroundFX />
       <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-      {/* Header */}
-      <div className="absolute top-4 right-4 flex items-center space-x-4">
-        <div className="flex items-center space-x-2 text-sm text-gray-200">
-          <UserIcon size={16} />
-          <span>{user?.email}</span>
-        </div>
-        <button
-          onClick={handleSignOut}
-          className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
-        >
-          <LogOut size={16} />
-          <span>Sign Out</span>
-        </button>
-      </div>
-
-      <div className="w-full max-w-lg text-center">
-        {/* Enhanced Avatar with animations */}
-        <AIAvatar 
-          isUserSpeaking={isUserSpeaking}
-          isAISpeaking={isAISpeaking}
-          isProcessing={isProcessing}
-          isListening={isCallActive && !isUserSpeaking && !isProcessing && !isAISpeaking}
-        />
-        
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2 animate-fade-in-up">
-            <span className="text-white">humo</span>
-            <span className="text-pink-500 text-glow-pink">.ai</span>
-          </h1>
-          <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up`}>
-            {getStatusMessage()}
-          </p>
+        {/* Header */}
+        <div className="absolute top-4 right-4 flex items-center space-x-4">
+          {/* Language Selector */}
+          <LanguageSelector
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            detectedLanguage={detectedLanguage}
+            className="mr-4"
+          />
+          
+          <div className="flex items-center space-x-2 text-sm text-gray-200">
+            <UserIcon size={16} />
+            <span>{user?.email}</span>
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
+          >
+            <LogOut size={16} />
+            <span>Sign Out</span>
+          </button>
         </div>
 
-        {/* Call Control Button */}
-        <div className="flex justify-center mb-8">
-          {!isCallActive ? (
-            <button
-              onClick={handleStartCall}
-              disabled={isProcessing}
-              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-emerald-500 hover:bg-emerald-600 shadow-xl disabled:bg-gray-600 disabled:cursor-not-allowed hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-300/60"
-            >
-              <Mic />
-            </button>
-          ) : (
-            <button
-              onClick={handleEndCall}
-              className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 shadow-xl hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-300/60"
-            >
-              <MicOff />
-            </button>
+        <div className="w-full max-w-lg text-center">
+          {/* Enhanced Avatar with animations */}
+          <AIAvatar 
+            isUserSpeaking={isUserSpeaking}
+            isAISpeaking={isAISpeaking}
+            isProcessing={isProcessing}
+            isListening={isCallActive && !isUserSpeaking && !isProcessing && !isAISpeaking}
+          />
+          
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold mb-2 animate-fade-in-up">
+              <span className="text-white">humo</span>
+              <span className="text-pink-500 text-glow-pink">.ai</span>
+            </h1>
+            <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up`}>
+              {getStatusMessage()}
+            </p>
+            
+            {/* Language Status Display */}
+            {isCallActive && (
+              <div className="mt-2 text-sm text-gray-400">
+                <span>Language: {companion.getLanguageDisplayName(currentLanguage)}</span>
+                {detectedLanguage && detectedLanguage !== currentLanguage && (
+                  <span className="text-amber-400 ml-2">
+                    (Detected: {companion.getLanguageDisplayName(detectedLanguage as SupportedLanguage)})
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Call Control Button */}
+          <div className="flex justify-center mb-8">
+            {!isCallActive ? (
+              <button
+                onClick={handleStartCall}
+                disabled={isProcessing}
+                className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-emerald-500 hover:bg-emerald-600 shadow-xl disabled:bg-gray-600 disabled:cursor-not-allowed hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-300/60"
+              >
+                <Mic />
+              </button>
+            ) : (
+              <button
+                onClick={handleEndCall}
+                className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 shadow-xl hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-300/60"
+              >
+                <MicOff />
+              </button>
+            )}
+          </div>
+
+          {/* Visual state indicators as animated gradient pills */}
+          <div className="flex justify-center gap-3 mb-4">
+            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-sky-400 animate-pulse' : 'bg-gray-500'}`} />
+              <span className="hidden sm:inline">Connected</span>
+              <Activity size={14} className={`${isCallActive ? 'text-sky-400' : 'text-gray-500'}`} />
+            </div>
+            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
+              <Volume2 size={14} className={`${isUserSpeaking ? 'text-pink-400 animate-pulse' : 'text-gray-500'}`} />
+              <span className="hidden sm:inline">Speaking</span>
+            </div>
+            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
+              <MessageSquare size={14} className={`${isAISpeaking ? 'text-emerald-400 animate-pulse' : 'text-gray-500'}`} />
+              <span className="hidden sm:inline">AI Response</span>
+            </div>
+          </div>
+
+          {/* Language-specific hints */}
+          {!isCallActive && (
+            <div className="mt-4 text-xs text-gray-500 max-w-md mx-auto">
+              {currentLanguage === 'auto' && (
+                <p>🌐 Auto-detect mode: Speak in any supported language</p>
+              )}
+              {currentLanguage === 'hi' && (
+                <p>🇮🇳 हिंदी में बात करें • Hindi voice active</p>
+              )}
+              {currentLanguage === 'ar' && (
+                <p className="text-right">🇸🇦 تحدث باللغة العربية • Arabic voice active</p>
+              )}
+              {currentLanguage === 'en' && (
+                <p>🇺🇸 Speak in English • English voice active</p>
+              )}
+            </div>
+          )}
+
+          {/* Error messages */}
+          {error && (
+            <div className="mt-4 p-4 glass border border-red-500/50 rounded-xl text-red-200">
+              <p>❌ {error}</p>
+            </div>
+          )}
+
+          {/* Language detection notification */}
+          {detectedLanguage && detectedLanguage !== currentLanguage && currentLanguage !== 'auto' && (
+            <div className="mt-4 p-3 glass border border-amber-500/50 rounded-xl text-amber-200 text-sm">
+              <p>💡 Detected {companion.getLanguageDisplayName(detectedLanguage as SupportedLanguage)}. 
+                 Switch to "Auto Detect" for seamless multi-language support.</p>
+            </div>
           )}
         </div>
-
-        {/* Visual state indicators as animated gradient pills */}
-        <div className="flex justify-center gap-3 mb-4">
-          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
-            <span className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-sky-400 animate-pulse' : 'bg-gray-500'}`} />
-            <span className="hidden sm:inline">Connected</span>
-            <Activity size={14} className={`${isCallActive ? 'text-sky-400' : 'text-gray-500'}`} />
-          </div>
-          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
-            <Volume2 size={14} className={`${isUserSpeaking ? 'text-pink-400 animate-pulse' : 'text-gray-500'}`} />
-            <span className="hidden sm:inline">Speaking</span>
-          </div>
-          <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
-            <MessageSquare size={14} className={`${isAISpeaking ? 'text-emerald-400 animate-pulse' : 'text-gray-500'}`} />
-            <span className="hidden sm:inline">AI Response</span>
-          </div>
-        </div>
-
-        {/* Error messages */}
-        {error && (
-          <div className="mt-4 p-4 glass border border-red-500/50 rounded-xl text-red-200">
-            <p>❌ {error}</p>
-          </div>
-        )}
-      </div>
       </div>
     </div>
   );

@@ -41,7 +41,86 @@ export default {
         pink: '0 0 10px rgba(236, 72, 153, 0.65)',
         blue: '0 0 8px rgba(59, 130, 246, 0.65)',
       },
+      fontFamily: {
+        // Add fonts for different languages
+        'arabic': ['Noto Sans Arabic', 'Arial', 'sans-serif'],
+        'hindi': ['Noto Sans Devanagari', 'Arial', 'sans-serif'],
+        'english': ['Inter', 'system-ui', 'sans-serif'],
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    // Add RTL support plugin
+    function({ addUtilities }) {
+      const newUtilities = {
+        '.rtl': {
+          direction: 'rtl',
+        },
+        '.ltr': {
+          direction: 'ltr',
+        },
+        '.text-start': {
+          'text-align': 'start',
+        },
+        '.text-end': {
+          'text-align': 'end',
+        },
+        // RTL-specific spacing utilities
+        '.mr-auto-rtl': {
+          '[dir="rtl"] &': {
+            'margin-left': 'auto',
+            'margin-right': '0',
+          },
+          '[dir="ltr"] &': {
+            'margin-right': 'auto',
+            'margin-left': '0',
+          },
+        },
+        '.ml-auto-rtl': {
+          '[dir="rtl"] &': {
+            'margin-right': 'auto',
+            'margin-left': '0',
+          },
+          '[dir="ltr"] &': {
+            'margin-left': 'auto',
+            'margin-right': '0',
+          },
+        },
+        // Language-specific text styling
+        '.text-arabic': {
+          'font-family': 'Noto Sans Arabic, Arial, sans-serif',
+          'font-weight': '400',
+          'line-height': '1.6',
+        },
+        '.text-hindi': {
+          'font-family': 'Noto Sans Devanagari, Arial, sans-serif',
+          'font-weight': '400',
+          'line-height': '1.6',
+        },
+        '.text-english': {
+          'font-family': 'Inter, system-ui, sans-serif',
+          'font-weight': '400',
+          'line-height': '1.5',
+        },
+        // Language-specific sizing for better readability
+        '.text-lg-arabic': {
+          'font-size': '1.125rem',
+          'line-height': '1.75rem',
+        },
+        '.text-lg-hindi': {
+          'font-size': '1.125rem', 
+          'line-height': '1.75rem',
+        },
+        '.text-sm-arabic': {
+          'font-size': '0.875rem',
+          'line-height': '1.5rem',
+        },
+        '.text-sm-hindi': {
+          'font-size': '0.875rem',
+          'line-height': '1.5rem',
+        },
+      }
+      addUtilities(newUtilities)
+    }
+  ],
 };
