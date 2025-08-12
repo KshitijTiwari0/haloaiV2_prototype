@@ -129,51 +129,52 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
 
   // Get status message based on current state
   const getStatusMessage = () => {
-    if (!isCallActive) return 'Tap to start your conversation';
-    if (isAISpeaking) return 'AI is responding...';
-    if (isProcessing) return 'Processing your message...';
-    if (isUserSpeaking) return 'Listening to you...';
-    return 'Ready to listen...';
+    if (error) return "An error occurred. Please try again.";
+    if (!isCallActive) return "Tap the mic to start speaking";
+    if (isAISpeaking) return "AI is responding...";
+    if (isProcessing) return "Thinking...";
+    if (isUserSpeaking) return "I'm listening...";
+    return "You can speak now...";
   };
 
   // Get status color based on current state
   const getStatusColor = () => {
-    if (!isCallActive) return 'text-gray-400';
-    if (isAISpeaking) return 'text-green-400';
-    if (isProcessing) return 'text-purple-400';
-    if (isUserSpeaking) return 'text-red-400';
-    return 'text-blue-400';
+    if (error) return "text-red-400";
+    if (!isCallActive) return "text-gray-400";
+    if (isAISpeaking) return "text-emerald-400";
+    if (isProcessing) return "text-purple-400";
+    if (isUserSpeaking) return "text-pink-400";
+    return "text-sky-400";
   };
 
   return (
     <div className={`relative min-h-screen text-white ${isRTL ? 'rtl' : 'ltr'}`}>
       <BackgroundFX />
-      <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+      <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6">
         {/* Header */}
-        <div className="absolute top-4 right-4 flex items-center space-x-4">
-          {/* Language Selector */}
-          <LanguageSelector
-            currentLanguage={currentLanguage}
-            onLanguageChange={handleLanguageChange}
-            detectedLanguage={detectedLanguage}
-            className="mr-4"
-          />
-          
+        <div className="w-full flex justify-between items-center">
           <div className="flex items-center space-x-2 text-sm text-gray-200">
             <UserIcon size={16} />
-            <span>{user?.email}</span>
+            <span className="hidden sm:inline">{user?.email}</span>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
-          >
-            <LogOut size={16} />
-            <span>Sign Out</span>
-          </button>
+          <div className="flex items-center space-x-2 sm:space-x-4">
+            <LanguageSelector
+              currentLanguage={currentLanguage}
+              onLanguageChange={handleLanguageChange}
+              detectedLanguage={detectedLanguage}
+            />
+            <button
+              onClick={handleSignOut}
+              className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
+            >
+              <LogOut size={16} />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
         </div>
 
-        <div className="w-full max-w-lg text-center">
-          {/* Enhanced Avatar with animations */}
+        {/* Main Content */}
+        <div className="w-full max-w-lg text-center flex flex-col items-center justify-center flex-grow">
           <AIAvatar 
             isUserSpeaking={isUserSpeaking}
             isAISpeaking={isAISpeaking}
@@ -181,30 +182,17 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             isListening={isCallActive && !isUserSpeaking && !isProcessing && !isAISpeaking}
           />
           
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold mb-2 animate-fade-in-up">
+          <div className="mb-6">
+            <h1 className="text-3xl sm:text-4xl font-bold mb-2 animate-fade-in-up">
               <span className="text-white">humo</span>
               <span className="text-pink-500 text-glow-pink">.ai</span>
             </h1>
-            <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up`}>
+            <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up text-base sm:text-lg`}>
               {getStatusMessage()}
             </p>
-            
-            {/* Language Status Display */}
-            {isCallActive && (
-              <div className="mt-2 text-sm text-gray-400">
-                <span>Language: {companion.getLanguageDisplayName(currentLanguage)}</span>
-                {detectedLanguage && detectedLanguage !== currentLanguage && (
-                  <span className="text-amber-400 ml-2">
-                    (Detected: {companion.getLanguageDisplayName(detectedLanguage as SupportedLanguage)})
-                  </span>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* Call Control Button */}
-          <div className="flex justify-center mb-8">
+          <div className="flex justify-center mb-6">
             {!isCallActive ? (
               <button
                 onClick={handleStartCall}
@@ -222,52 +210,34 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
               </button>
             )}
           </div>
+        </div>
 
-          {/* Visual state indicators as animated gradient pills */}
-          <div className="flex justify-center gap-3 mb-4">
-            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
+        {/* Footer */}
+        <div className="w-full">
+          <div className="flex justify-center gap-2 sm:gap-3 mb-4 flex-wrap">
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
               <span className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-sky-400 animate-pulse' : 'bg-gray-500'}`} />
-              <span className="hidden sm:inline">Connected</span>
+              <span>Connected</span>
               <Activity size={14} className={`${isCallActive ? 'text-sky-400' : 'text-gray-500'}`} />
             </div>
-            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
               <Volume2 size={14} className={`${isUserSpeaking ? 'text-pink-400 animate-pulse' : 'text-gray-500'}`} />
-              <span className="hidden sm:inline">Speaking</span>
+              <span>Speaking</span>
             </div>
-            <div className={`glass px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
               <MessageSquare size={14} className={`${isAISpeaking ? 'text-emerald-400 animate-pulse' : 'text-gray-500'}`} />
-              <span className="hidden sm:inline">AI Response</span>
+              <span>AI Response</span>
             </div>
           </div>
 
-          {/* Language-specific hints */}
-          {!isCallActive && (
-            <div className="mt-4 text-xs text-gray-500 max-w-md mx-auto">
-              {currentLanguage === 'auto' && (
-                <p>🌐 Auto-detect mode: Speak in any supported language</p>
-              )}
-              {currentLanguage === 'hi' && (
-                <p>🇮🇳 हिंदी में बात करें • Hindi voice active</p>
-              )}
-              {currentLanguage === 'ar' && (
-                <p className="text-right">🇸🇦 تحدث باللغة العربية • Arabic voice active</p>
-              )}
-              {currentLanguage === 'en' && (
-                <p>🇺🇸 Speak in English • English voice active</p>
-              )}
-            </div>
-          )}
-
-          {/* Error messages */}
           {error && (
-            <div className="mt-4 p-4 glass border border-red-500/50 rounded-xl text-red-200">
+            <div className="mt-4 p-3 glass border border-red-500/50 rounded-xl text-red-200 text-sm max-w-md mx-auto">
               <p>❌ {error}</p>
             </div>
           )}
 
-          {/* Language detection notification */}
           {detectedLanguage && detectedLanguage !== currentLanguage && currentLanguage !== 'auto' && (
-            <div className="mt-4 p-3 glass border border-amber-500/50 rounded-xl text-amber-200 text-sm">
+            <div className="mt-4 p-3 glass border border-amber-500/50 rounded-xl text-amber-200 text-sm max-w-md mx-auto">
               <p>💡 Detected {companion.getLanguageDisplayName(detectedLanguage as SupportedLanguage)}. 
                  Switch to "Auto Detect" for seamless multi-language support.</p>
             </div>
