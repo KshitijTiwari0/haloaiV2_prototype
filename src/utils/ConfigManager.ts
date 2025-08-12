@@ -8,9 +8,9 @@ export class ConfigManager {
 
   // Voice mapping for different languages
   private readonly voiceMapping = {
-    'en': '21m00Tcm4TlvDq8ikWAM', // Default English voice
-    'hi': 'yRis6UiS4dtT4Aqv72DC', // Ranbir M - Deep, Engaging Hindi Voice
-    'ar': 'tavIIPLplRB883FzWU0V'  // Mona - Middle-aged Female with Arabic Modern Standard accent
+    'en': 's3TPKV1kjDlVtZbl4Ksh', 
+    'hi': 'jqcCZkN6Knx8BJ5TBdYR', 
+    'ar': 'tavIIPLplRB883FzWU0V'  
   };
 
   constructor() {
