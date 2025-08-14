@@ -13,9 +13,9 @@ export class AudioProcessor {
   private isProcessing: boolean = false;
   private currentLanguage: SupportedLanguage = 'auto';
 
-  private readonly MAX_RECORDING_TIME = 30000;
-  private readonly SILENCE_TIMEOUT = 3000;
-  private readonly MIN_RECORDING_TIME = 1000;
+  private readonly MAX_RECORDING_TIME = 30000; // 30 seconds
+  private readonly SILENCE_TIMEOUT = 3000; // 3 seconds of silence
+  private readonly MIN_RECORDING_TIME = 1000; // 1 second minimum
 
   constructor() {
     console.log('AudioProcessor initialized for OpenAI Whisper with multi-language support');
@@ -53,9 +53,12 @@ export class AudioProcessor {
       
       await this.startRecording();
       console.log(`Started continuous audio streaming for Whisper (language: ${language})`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error accessing microphone:', error);
-      throw new Error('Failed to access microphone. Please check permissions.');
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+        throw new Error('Microphone permission was denied. Please allow microphone access in your browser settings.');
+      }
+      throw new Error('Failed to access microphone. Please check permissions and ensure your connection is secure (HTTPS).');
     }
   }
 
@@ -65,18 +68,26 @@ export class AudioProcessor {
     try {
       this.audioChunks = [];
 
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      const supportedFormats = isIOS ? 
-        ['audio/mp4', 'audio/aac'] : 
-        ['audio/webm;codecs=opus', 'audio/mp4'];
+      // Safari/iOS is very specific about supported MIME types.
+      const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      
+      const supportedFormats = [
+        // Prioritize iOS-friendly formats first if on an Apple device
+        ...(isAppleDevice ? ['audio/mp4', 'audio/aac'] : []), 
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        // Fallback
+        'audio/webm',
+      ];
 
-      let selectedFormat = 'audio/wav';
-      for (const format of supportedFormats) {
-        if (MediaRecorder.isTypeSupported(format)) {
-          selectedFormat = format;
-          break;
-        }
+      let selectedFormat: string | undefined = supportedFormats.find(format => MediaRecorder.isTypeSupported(format));
+
+      if (!selectedFormat) {
+          console.warn("No preferred MIME type supported. Falling back to default.");
+          selectedFormat = 'audio/webm'; // Let it try the default if none are explicitly supported
       }
+      
+      console.log(`Using MIME type: ${selectedFormat}`);
 
       const options: MediaRecorderOptions = { mimeType: selectedFormat };
       this.mediaRecorder = new MediaRecorder(this.stream, options);
@@ -93,9 +104,11 @@ export class AudioProcessor {
 
       this.mediaRecorder.onerror = (event) => {
         console.error('MediaRecorder error:', event);
+        // Attempt to recover by restarting the recording process
+        this.startNextRecording();
       };
 
-      this.mediaRecorder.start(250);
+      this.mediaRecorder.start(250); // Collect chunks every 250ms
       this.isRecording = true;
       this.onSpeechStartCallback?.();
 
@@ -118,18 +131,20 @@ export class AudioProcessor {
     }
 
     this.silenceTimeout = setTimeout(() => {
-      console.log('Silence detected, stopping recording');
-      this.stopCurrentRecording();
+      if (Date.now() - (this.mediaRecorder?.start || 0) > this.MIN_RECORDING_TIME) {
+        console.log('Silence detected, stopping recording');
+        this.stopCurrentRecording();
+      }
     }, this.SILENCE_TIMEOUT) as unknown as number;
   }
-
+  
   private stopCurrentRecording(): void {
     if (!this.mediaRecorder || !this.isRecording) return;
-
+  
     try {
       this.mediaRecorder.stop();
       this.isRecording = false;
-
+  
       if (this.recordingTimeout) {
         clearTimeout(this.recordingTimeout);
         this.recordingTimeout = null;
@@ -138,25 +153,31 @@ export class AudioProcessor {
         clearTimeout(this.silenceTimeout);
         this.silenceTimeout = null;
       }
-
+  
       console.log('Recording stopped');
     } catch (error) {
-      console.error('Error stopping recording:', error);
+      if (error instanceof DOMException && error.name === 'InvalidStateError') {
+        console.warn('Tried to stop an already stopped recorder.');
+      } else {
+        console.error('Error stopping recording:', error);
+      }
     }
   }
 
   private async processRecording(): Promise<void> {
-    if (this.audioChunks.length === 0 || this.isProcessing) return;
+    if (this.audioChunks.length === 0 || this.isProcessing) {
+      if (!this.isProcessing) this.startNextRecording();
+      return;
+    }
 
     this.isProcessing = true;
 
     try {
-      const audioBlob = new Blob(this.audioChunks, { 
-        type: this.mediaRecorder?.mimeType || 'audio/webm' 
-      });
+      const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
+      const audioBlob = new Blob(this.audioChunks, { type: mimeType });
 
       if (audioBlob.size < 1000) {
-        console.log('Recording too short, skipping transcription');
+        console.log('Recording too short, skipping transcription.');
         this.startNextRecording();
         return;
       }
@@ -164,26 +185,19 @@ export class AudioProcessor {
       console.log('Processing audio blob:', {
         size: audioBlob.size,
         type: audioBlob.type,
-        chunks: this.audioChunks.length,
         language: this.currentLanguage
       });
 
-      const result = await this.transcribeWithWhisper(audioBlob);
+      const result = await this.transcribeWithWhisper(audioBlob, mimeType);
       
       if (result.text && result.text.trim()) {
-        console.log('Whisper transcript:', {
-          text: result.text,
-          detectedLanguage: result.language,
-          requestedLanguage: this.currentLanguage
-        });
-        
         this.onTranscriptUpdateCallback?.({
           text: result.text.trim(),
           final: true,
           language: result.language
         });
       } else {
-        console.log('No speech detected in audio');
+        console.log('No speech detected in audio.');
         this.startNextRecording();
       }
 
@@ -193,23 +207,19 @@ export class AudioProcessor {
     }
   }
 
-  private async transcribeWithWhisper(audioBlob: Blob): Promise<{ text: string; language?: string }> {
+  private async transcribeWithWhisper(audioBlob: Blob, mimeType: string): Promise<{ text: string; language?: string }> {
     try {
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      let audioFile: File;
-      
-      if (isIOS && audioBlob.type.includes('mp4')) {
-        audioFile = new File([audioBlob], 'audio.mp4', { type: 'audio/mp4' });
-      } else if (isIOS && audioBlob.type.includes('aac')) {
-        audioFile = new File([audioBlob], 'audio.aac', { type: 'audio/aac' });
-      } else {
-        audioFile = new File([audioBlob], 'audio.webm', { type: audioBlob.type });
-      }
+        const fileExtension = mimeType.split('/')[1].split(';')[0];
+        const filename = `audio.${fileExtension}`;
+        const audioFile = new File([audioBlob], filename, { type: mimeType });
 
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('model', 'whisper-1');
-      formData.append('language', this.currentLanguage);
+      if (this.currentLanguage !== 'auto') {
+        formData.append('language', this.currentLanguage);
+      }
+      formData.append('response_format', 'json');
 
       console.log(`Sending transcription request with language: ${this.currentLanguage}`);
 
@@ -247,7 +257,7 @@ export class AudioProcessor {
     }
   }
 
-  pauseRecording(): void {
+  public pauseRecording(): void {
     console.log('Pausing recording...');
     this.isPaused = true;
     
@@ -256,36 +266,32 @@ export class AudioProcessor {
     }
   }
 
-  resumeRecording(): void {
+  public resumeRecording(): void {
     console.log('Resuming recording...');
     this.isPaused = false;
     this.isProcessing = false;
     
     if (this.stream) {
+      // Add a small delay to ensure the audio context is ready
       setTimeout(() => {
         this.startRecording();
-      }, 1000);
+      }, 1000); 
     }
   }
 
-  stopContinuousStreaming(): void {
+  public stopContinuousStreaming(): void {
     console.log('Stopping continuous streaming...');
     
-    this.isPaused = false;
-    this.isProcessing = false;
+    this.isPaused = true; // Set to paused to prevent automatic restarts
     
     if (this.isRecording) {
       this.stopCurrentRecording();
     }
 
-    if (this.recordingTimeout) {
-      clearTimeout(this.recordingTimeout);
-      this.recordingTimeout = null;
-    }
-    if (this.silenceTimeout) {
-      clearTimeout(this.silenceTimeout);
-      this.silenceTimeout = null;
-    }
+    if (this.recordingTimeout) clearTimeout(this.recordingTimeout);
+    if (this.silenceTimeout) clearTimeout(this.silenceTimeout);
+    this.recordingTimeout = null;
+    this.silenceTimeout = null;
 
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
@@ -295,34 +301,5 @@ export class AudioProcessor {
     this.mediaRecorder = null;
     this.audioChunks = [];
     this.isRecording = false;
-  }
-
-  restartRecording(): void {
-    if (!this.isPaused && !this.isProcessing && this.stream) {
-      this.startRecording();
-    }
-  }
-
-  getSupportedLanguages(): { code: SupportedLanguage; name: string }[] {
-    return [
-      { code: 'auto', name: 'Auto Detect' },
-      { code: 'en', name: 'English' },
-      { code: 'hi', name: 'हिन्दी (Hindi)' },
-      { code: 'ar', name: 'العربية (Arabic)' }
-    ];
-  }
-
-  isLanguageSupported(language: string): boolean {
-    return ['auto', 'en', 'hi', 'ar'].includes(language);
-  }
-
-  getLanguageDisplayName(language: SupportedLanguage): string {
-    const names = {
-      'auto': 'Auto Detect',
-      'en': 'English',
-      'hi': 'हिन्दी (Hindi)',
-      'ar': 'العربية (Arabic)'
-    };
-    return names[language] || 'Unknown';
   }
 }
