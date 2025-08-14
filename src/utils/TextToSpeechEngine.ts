@@ -11,6 +11,8 @@ export class TextToSpeechEngine {
   private audioProcessor: AudioProcessor | null = null;
   private onSpeakingStartCallback: (() => void) | null = null;
   private onSpeakingEndCallback: (() => void) | null = null;
+  private isIOS: boolean;
+  private audioContext: AudioContext | null = null;
 
   // Voice mapping for different languages
   private readonly voiceMapping = {
@@ -26,7 +28,27 @@ export class TextToSpeechEngine {
     
     this.elevenLabsApiKey = elevenLabsApiKey;
     this.voiceId = voiceId;
-    console.log(`TextToSpeechEngine initialized with voice_id: ${voiceId}`);
+    
+    // Detect iOS
+    this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    
+    console.log(`TextToSpeechEngine initialized for ${this.isIOS ? 'iOS' : 'Desktop'} with voice_id: ${voiceId}`);
+  }
+
+  private async initializeAudioContext(): Promise<AudioContext> {
+    if (!this.audioContext) {
+      // Use webkit prefix for iOS compatibility
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioContextClass();
+    }
+
+    // iOS requires user interaction to resume audio context
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    return this.audioContext;
   }
 
   // Add method to set audio processor reference
@@ -120,10 +142,11 @@ export class TextToSpeechEngine {
     try {
       console.log(`Using Eleven Labs API with voice_id: ${selectedVoiceId} for text: ${text.substring(0, 50)}...`);
       
-      // Enforce minimum delay to avoid rate limits
+      // Enforce minimum delay to avoid rate limits (longer for iOS)
+      const minDelay = this.isIOS ? 1500 : this.minDelay;
       const elapsed = Date.now() - this.lastApiCall;
-      if (elapsed < this.minDelay) {
-        await new Promise(resolve => setTimeout(resolve, this.minDelay - elapsed));
+      if (elapsed < minDelay) {
+        await new Promise(resolve => setTimeout(resolve, minDelay - elapsed));
       }
 
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`;
@@ -133,58 +156,30 @@ export class TextToSpeechEngine {
         'Accept': 'audio/mpeg'
       };
 
-      // Enhanced voice settings for multilingual support
       const data = {
         text: text,
-        model_id: "eleven_multilingual_v2", // Use multilingual model
+        model_id: "eleven_multilingual_v2",
         voice_settings: {
-          stability: 0.6, // Slightly higher for multilingual
-          similarity_boost: 0.7, // Higher for better accent preservation
-          style: 0.2, // Add some style for natural speech
+          stability: this.isIOS ? 0.7 : 0.6, // Higher stability for iOS
+          similarity_boost: this.isIOS ? 0.8 : 0.7, // Higher boost for iOS
+          style: 0.2,
           use_speaker_boost: true
         }
       };
 
+      // iOS needs longer timeout
+      const timeoutMs = this.isIOS ? 60000 : 30000;
+      
       const response = await axios.post(url, data, {
         headers,
-        timeout: 30000,
+        timeout: timeoutMs,
         responseType: 'blob'
       });
 
       this.lastApiCall = Date.now();
 
       if (response.status === 200) {
-        // Create audio element and play
-        const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        
-        // Optimized audio settings
-        audio.preload = 'auto';
-        audio.volume = 0.9;
-        
-        await new Promise((resolve, reject) => {
-          const cleanup = () => {
-            URL.revokeObjectURL(audioUrl);
-          };
-
-          audio.onended = () => {
-            cleanup();
-            resolve(void 0);
-          };
-          
-          audio.onerror = (error) => {
-            cleanup();
-            reject(new Error('Audio playback failed'));
-          };
-
-          audio.oncanplaythrough = () => {
-            audio.play().catch(reject);
-          };
-
-          audio.load();
-        });
-
+        await this.playAudioBlob(response.data);
         console.log(`Successfully played audio with Eleven Labs (voice: ${selectedVoiceId})`);
       } else {
         throw new Error(`Eleven Labs API error: ${response.status}`);
@@ -192,19 +187,159 @@ export class TextToSpeechEngine {
     } catch (error) {
       console.error('Error with Eleven Labs API:', error);
       
-      // Enhanced error handling
       if (axios.isAxiosError(error)) {
+        if (error.code === 'ECONNABORTED') {
+          throw new Error('Audio generation timeout - please try again');
+        }
         if (error.response?.status === 401) {
           throw new Error('Invalid Eleven Labs API key');
         } else if (error.response?.status === 429) {
           throw new Error('Eleven Labs rate limit exceeded. Please try again later.');
-        } else if (error.response?.status === 422) {
-          throw new Error('Invalid text or voice settings for Eleven Labs');
         }
+      }
+      
+      // Fallback to Web Speech API on iOS if Eleven Labs fails
+      if (this.isIOS) {
+        console.log('Falling back to Web Speech API on iOS');
+        await this.speakWithWebSpeech(text);
+        return;
       }
       
       throw new Error('Failed to generate speech with Eleven Labs');
     }
+  }
+
+  private async playAudioBlob(audioBlob: Blob): Promise<void> {
+    if (this.isIOS) {
+      // Use AudioContext for better iOS compatibility
+      await this.playWithAudioContext(audioBlob);
+    } else {
+      // Use Audio element for desktop
+      await this.playWithAudioElement(audioBlob);
+    }
+  }
+
+  private async playWithAudioContext(audioBlob: Blob): Promise<void> {
+    try {
+      const audioContext = await this.initializeAudioContext();
+      
+      // Convert blob to array buffer
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      
+      // Decode audio data
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      
+      // Create source and connect to destination
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      
+      // Play the audio
+      return new Promise((resolve, reject) => {
+        source.onended = () => resolve();
+        source.onerror = (error) => reject(new Error('Audio playback failed'));
+        
+        try {
+          source.start(0);
+        } catch (error) {
+          reject(error);
+        }
+      });
+      
+    } catch (error) {
+      console.error('AudioContext playback failed:', error);
+      // Fallback to audio element
+      await this.playWithAudioElement(audioBlob);
+    }
+  }
+
+  private async playWithAudioElement(audioBlob: Blob): Promise<void> {
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    
+    // iOS-specific audio settings
+    if (this.isIOS) {
+      audio.preload = 'auto';
+      audio.muted = false;
+      audio.volume = 1.0;
+      
+      // Required for iOS autoplay
+      audio.setAttribute('playsinline', 'true');
+    } else {
+      audio.preload = 'auto';
+      audio.volume = 0.9;
+    }
+    
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onended = () => {
+        cleanup();
+        resolve();
+      };
+      
+      audio.onerror = (error) => {
+        cleanup();
+        reject(new Error('Audio playback failed'));
+      };
+
+      // iOS needs user interaction for autoplay
+      if (this.isIOS) {
+        audio.oncanplaythrough = () => {
+          // Try to play immediately
+          const playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(reject);
+          }
+        };
+      } else {
+        audio.oncanplaythrough = () => {
+          audio.play().catch(reject);
+        };
+      }
+
+      audio.load();
+    });
+  }
+
+  // Fallback Web Speech API for iOS
+  private async speakWithWebSpeech(text: string): Promise<void> {
+    if (!('speechSynthesis' in window)) {
+      throw new Error('Speech synthesis not supported');
+    }
+
+    return new Promise((resolve, reject) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Try to select appropriate voice for language
+      const voices = speechSynthesis.getVoices();
+      const arabicVoice = voices.find(voice => voice.lang.startsWith('ar'));
+      const hindiVoice = voices.find(voice => voice.lang.startsWith('hi'));
+      const englishVoice = voices.find(voice => voice.lang.startsWith('en'));
+      
+      // Auto-detect language and set voice
+      if (/[\u0600-\u06FF]/.test(text) && arabicVoice) {
+        utterance.voice = arabicVoice;
+        utterance.lang = 'ar';
+      } else if (/[\u0900-\u097F]/.test(text) && hindiVoice) {
+        utterance.voice = hindiVoice;
+        utterance.lang = 'hi';
+      } else if (englishVoice) {
+        utterance.voice = englishVoice;
+        utterance.lang = 'en';
+      }
+      
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      utterance.onend = () => resolve();
+      utterance.onerror = (error) => reject(new Error(`Speech synthesis failed: ${error.error}`));
+      
+      speechSynthesis.speak(utterance);
+    });
   }
 
   async speakText(text: string, pauseRecording: boolean = true, detectedLanguage?: string): Promise<void> {
@@ -213,35 +348,50 @@ export class TextToSpeechEngine {
       throw new Error('No text to speak');
     }
 
-    // Clean text for TTS - preserve language-specific characters
     const cleanText = text
-      .replace(/[*_~`#]/g, '') // Remove markdown formatting
-      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/[*_~`#]/g, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
-    console.log(`Processing text for TTS (${detectedLanguage || 'auto-detect'}): ${cleanText}`);
-
-    // Auto-select appropriate voice based on detected language or text content
-    const selectedVoiceId = this.selectVoiceForText(cleanText, detectedLanguage);
+    console.log(`Processing text for TTS on ${this.isIOS ? 'iOS' : 'Desktop'} (${detectedLanguage || 'auto-detect'}): ${cleanText}`);
 
     // Notify that AI is starting to speak
     this.onSpeakingStartCallback?.();
 
-    // Always pause recording during TTS to prevent feedback
+    // More aggressive recording pause for iOS
     if (this.audioProcessor && pauseRecording) {
       this.audioProcessor.pauseRecording();
+      
+      // Extra delay for iOS to ensure clean audio separation
+      if (this.isIOS) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
 
     try {
+      const selectedVoiceId = this.selectVoiceForText(cleanText, detectedLanguage);
       const chunks = this.splitText(cleanText);
 
       for (let i = 0; i < chunks.length; i++) {
         console.log(`Speaking chunk ${i + 1}/${chunks.length} (${detectedLanguage}): ${chunks[i].substring(0, 50)}...`);
-        await this.speakWithElevenLabs(chunks[i], selectedVoiceId);
         
-        // Small delay between chunks to prevent audio overlap
+        try {
+          await this.speakWithElevenLabs(chunks[i], selectedVoiceId);
+        } catch (error) {
+          console.error(`Eleven Labs failed for chunk ${i + 1}, trying Web Speech API:`, error);
+          
+          // Fallback to Web Speech API on iOS
+          if (this.isIOS) {
+            await this.speakWithWebSpeech(chunks[i]);
+          } else {
+            throw error;
+          }
+        }
+        
+        // Longer delay between chunks on iOS
         if (i < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const delay = this.isIOS ? 500 : 200;
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 
@@ -252,9 +402,9 @@ export class TextToSpeechEngine {
       // Notify that AI has finished speaking
       this.onSpeakingEndCallback?.();
 
-      // Resume recording with appropriate delay
+      // Resume recording with longer delay for iOS
       if (this.audioProcessor && pauseRecording) {
-        const delay = 1500; // 1.5 seconds to ensure clean audio separation
+        const delay = this.isIOS ? 2500 : 1500; // Longer delay for iOS
         
         setTimeout(() => {
           this.audioProcessor?.resumeRecording();
@@ -354,5 +504,10 @@ export class TextToSpeechEngine {
     
     console.log(`Testing ${language} voice (${voiceId}): ${testText}`);
     await this.speakText(testText, false, language === 'auto' ? undefined : language);
+  }
+
+  // Get iOS status
+  getIsIOS(): boolean {
+    return this.isIOS;
   }
 }

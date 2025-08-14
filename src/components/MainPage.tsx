@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare, Smartphone } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
 import BackgroundFX from './BackgroundFX';
 import { LanguageSelector } from './LanguageSelector';
+import { IOSInstructions, isIOSDevice } from './IOSInstructions';
 import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
 import { ConfigManager, SupportedLanguage } from '../utils/ConfigManager';
 import { signOut } from '../lib/supabase';
@@ -23,6 +24,10 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('auto');
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [isRTL, setIsRTL] = useState(false);
+  
+  // iOS-specific state
+  const [showIOSInstructions, setShowIOSInstructions] = useState(false);
+  const [isIOS] = useState(isIOSDevice());
 
   // Initialize language state from companion
   useEffect(() => {
@@ -30,6 +35,18 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     setCurrentLanguage(language);
     setIsRTL(companion.isRTL());
   }, [companion]);
+
+  // Show iOS instructions on first load for iOS users
+  useEffect(() => {
+    if (isIOS && !localStorage.getItem('ios-instructions-shown')) {
+      setShowIOSInstructions(true);
+    }
+  }, [isIOS]);
+
+  const handleCloseIOSInstructions = () => {
+    setShowIOSInstructions(false);
+    localStorage.setItem('ios-instructions-shown', 'true');
+  };
 
   const handleSignOut = async () => {
     try {
@@ -54,7 +71,14 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
 
   const handleStartCall = useCallback(async () => {
     if (isCallActive || isProcessing) return;
+    
     try {
+      // Show instructions if this is the first interaction on iOS
+      if (isIOS && !localStorage.getItem('ios-permissions-granted')) {
+        setShowIOSInstructions(true);
+        return;
+      }
+
       setIsCallActive(true);
       setError(null);
 
@@ -72,7 +96,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       companion.setOnProcessingStart(() => {
         console.log('Processing started');
         setIsProcessing(true);
-        setIsUserSpeaking(false); // Stop user speaking when processing starts
+        setIsUserSpeaking(false);
       });
       
       companion.setOnProcessingEnd(() => {
@@ -84,7 +108,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       companion.setOnAISpeakingStart(() => {
         console.log('AI speaking started');
         setIsAISpeaking(true);
-        setIsProcessing(false); // Stop processing when AI starts speaking
+        setIsProcessing(false);
       });
 
       companion.setOnAISpeakingEnd(() => {
@@ -98,16 +122,34 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         setDetectedLanguage(language);
       });
       
-      console.log(`Starting call with language: ${currentLanguage}...`);
+      console.log(`Starting call with language: ${currentLanguage} on ${isIOS ? 'iOS' : 'Desktop'}...`);
       await companion.startCall();
       console.log('Call started successfully');
 
+      // Mark permissions as granted for iOS
+      if (isIOS) {
+        localStorage.setItem('ios-permissions-granted', 'true');
+      }
+
     } catch (err) {
       console.error('Call start error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      
+      // Show iOS-specific error messages
+      if (isIOS) {
+        const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+        if (errorMessage.includes('microphone') || errorMessage.includes('permission')) {
+          setError('Microphone access denied. Please check Safari settings and try again.');
+          setShowIOSInstructions(true);
+        } else {
+          setError(`iOS Error: ${errorMessage}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }
+      
       setIsCallActive(false);
     }
-  }, [companion, isCallActive, isProcessing, currentLanguage]);
+  }, [companion, isCallActive, isProcessing, currentLanguage, isIOS]);
 
   const handleEndCall = useCallback(() => {
     if (!isCallActive) return;
@@ -130,7 +172,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   // Get status message based on current state
   const getStatusMessage = () => {
     if (error) return "An error occurred. Please try again.";
-    if (!isCallActive) return "Tap the mic to start speaking";
+    if (!isCallActive) return isIOS ? "Tap the mic to start speaking (iOS mode)" : "Tap the mic to start speaking";
     if (isAISpeaking) return "AI is responding...";
     if (isProcessing) return "Thinking...";
     if (isUserSpeaking) return "I'm listening...";
@@ -150,12 +192,26 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   return (
     <div className={`relative min-h-screen text-white ${isRTL ? 'rtl' : 'ltr'}`}>
       <BackgroundFX />
+      
+      {/* iOS Instructions Modal */}
+      <IOSInstructions 
+        isVisible={showIOSInstructions} 
+        onClose={handleCloseIOSInstructions} 
+      />
+      
       <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6">
         {/* Header */}
         <div className="w-full flex justify-between items-center">
           <div className="flex items-center space-x-2 text-sm text-gray-200">
             <UserIcon size={16} />
             <span className="hidden sm:inline">{user?.email}</span>
+            {/* iOS indicator */}
+            {isIOS && (
+              <div className="glass px-2 py-1 rounded-full text-xs flex items-center space-x-1 ml-2">
+                <Smartphone size={10} className="text-blue-400" />
+                <span className="text-blue-300">iOS</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <LanguageSelector
@@ -233,6 +289,14 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
           {error && (
             <div className="mt-4 p-3 glass border border-red-500/50 rounded-xl text-red-200 text-sm max-w-md mx-auto">
               <p>❌ {error}</p>
+              {isIOS && (
+                <button 
+                  onClick={() => setShowIOSInstructions(true)}
+                  className="mt-2 text-blue-400 hover:text-blue-300 underline text-xs"
+                >
+                  View iOS setup instructions
+                </button>
+              )}
             </div>
           )}
 
