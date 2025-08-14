@@ -61,7 +61,7 @@ export const LoginPage: React.FC = () => {
           <h2 className="text-2xl font-semibold text-white mb-2">
             {isSignUp ? 'Create Account' : "Let's Get Started!"}
           </h2>
-          <p className="text-gray-300">Discover the latest 1000+ Voice Effects</p>
+          <p className="text-gray-300">Discover what is in your heart...</p>
         </div>
 
         {error && (

@@ -12,27 +12,20 @@ export class AudioProcessor {
   private silenceTimeout: number | null = null;
   private isProcessing: boolean = false;
   private currentLanguage: SupportedLanguage = 'auto';
-  private isIOS: boolean;
 
-  // Configuration - adjusted for iOS
-  private readonly MAX_RECORDING_TIME = 30000; // 30 seconds
-  private readonly SILENCE_TIMEOUT = 3000; // 3 seconds of silence
-  private readonly MIN_RECORDING_TIME = 1000; // 1 second minimum
+  private readonly MAX_RECORDING_TIME = 30000;
+  private readonly SILENCE_TIMEOUT = 3000;
+  private readonly MIN_RECORDING_TIME = 1000;
 
   constructor() {
-    // Detect iOS
-    this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    console.log('AudioProcessor initialized for:', this.isIOS ? 'iOS' : 'Desktop');
+    console.log('AudioProcessor initialized for OpenAI Whisper with multi-language support');
   }
 
-  // Set the language for transcription
   setLanguage(language: SupportedLanguage): void {
     this.currentLanguage = language;
     console.log(`AudioProcessor language set to: ${language}`);
   }
 
-  // Get current language setting
   getCurrentLanguage(): SupportedLanguage {
     return this.currentLanguage;
   }
@@ -47,63 +40,22 @@ export class AudioProcessor {
     this.currentLanguage = language;
 
     try {
-      // iOS-specific constraints
-      const constraints = this.isIOS ? {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          // Remove sampleRate constraint for iOS
-        }
-      } : {
+      this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           sampleRate: 16000,
         }
-      };
-
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      // iOS requires immediate user interaction
-      if (this.isIOS) {
-        await this.initializeIOSAudio();
-      }
+      });
 
       this.isPaused = false;
       this.isProcessing = false;
       
       await this.startRecording();
-      console.log(`Started continuous audio streaming for Whisper (language: ${language}) on ${this.isIOS ? 'iOS' : 'Desktop'}`);
+      console.log(`Started continuous audio streaming for Whisper (language: ${language})`);
     } catch (error) {
       console.error('Error accessing microphone:', error);
-      if (this.isIOS) {
-        throw new Error('Microphone access failed on iOS. Please ensure you granted permission and try again.');
-      }
       throw new Error('Failed to access microphone. Please check permissions.');
-    }
-  }
-
-  private async initializeIOSAudio(): Promise<void> {
-    try {
-      // Create a dummy audio context to unlock iOS audio
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const audioContext = new AudioContextClass();
-      
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
-      }
-      
-      // Create a brief silent sound to unlock audio
-      const buffer = audioContext.createBuffer(1, 1, 22050);
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContext.destination);
-      source.start();
-      
-      await audioContext.close();
-      console.log('iOS audio initialized successfully');
-    } catch (error) {
-      console.error('iOS audio initialization failed:', error);
     }
   }
 
@@ -111,23 +63,14 @@ export class AudioProcessor {
     if (!this.stream || this.isPaused || this.isProcessing) return;
 
     try {
-      // Clear any existing chunks
       this.audioChunks = [];
 
-      // iOS-compatible MediaRecorder options
-      const supportedFormats = this.isIOS ? [
-        'audio/mp4',
-        'audio/aac',
-        'audio/wav',
-        'audio/m4a'
-      ] : [
-        'audio/webm;codecs=opus',
-        'audio/mp4;codecs=mp4a.40.2',
-        'audio/webm',
-        'audio/mp4'
-      ];
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const supportedFormats = isIOS ? 
+        ['audio/mp4', 'audio/aac'] : 
+        ['audio/webm;codecs=opus', 'audio/mp4'];
 
-      let selectedFormat = 'audio/wav'; // Fallback
+      let selectedFormat = 'audio/wav';
       for (const format of supportedFormats) {
         if (MediaRecorder.isTypeSupported(format)) {
           selectedFormat = format;
@@ -135,10 +78,7 @@ export class AudioProcessor {
         }
       }
 
-      const options: MediaRecorderOptions = {
-        mimeType: selectedFormat
-      };
-
+      const options: MediaRecorderOptions = { mimeType: selectedFormat };
       this.mediaRecorder = new MediaRecorder(this.stream, options);
       
       this.mediaRecorder.ondataavailable = (event) => {
@@ -155,30 +95,24 @@ export class AudioProcessor {
         console.error('MediaRecorder error:', event);
       };
 
-      // Start recording - shorter data collection interval for iOS
-      const dataInterval = this.isIOS ? 500 : 250;
-      this.mediaRecorder.start(dataInterval);
+      this.mediaRecorder.start(250);
       this.isRecording = true;
       this.onSpeechStartCallback?.();
 
-      // Set maximum recording time - shorter for iOS
-      const maxRecordingTime = this.isIOS ? 15000 : this.MAX_RECORDING_TIME;
       this.recordingTimeout = setTimeout(() => {
         this.stopCurrentRecording();
-      }, maxRecordingTime) as unknown as number;
+      }, this.MAX_RECORDING_TIME) as unknown as number;
 
-      // Set silence detection timeout - shorter for iOS
-      const silenceTimeout = this.isIOS ? 2000 : this.SILENCE_TIMEOUT;
-      this.resetSilenceTimeout(silenceTimeout);
+      this.resetSilenceTimeout();
 
-      console.log(`Recording started (${selectedFormat}) on ${this.isIOS ? 'iOS' : 'Desktop'}`);
+      console.log('Recording started');
     } catch (error) {
       console.error('Error starting recording:', error);
       throw error;
     }
   }
 
-  private resetSilenceTimeout(timeout: number = this.SILENCE_TIMEOUT): void {
+  private resetSilenceTimeout(): void {
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
     }
@@ -186,7 +120,7 @@ export class AudioProcessor {
     this.silenceTimeout = setTimeout(() => {
       console.log('Silence detected, stopping recording');
       this.stopCurrentRecording();
-    }, timeout) as unknown as number;
+    }, this.SILENCE_TIMEOUT) as unknown as number;
   }
 
   private stopCurrentRecording(): void {
@@ -196,7 +130,6 @@ export class AudioProcessor {
       this.mediaRecorder.stop();
       this.isRecording = false;
 
-      // Clear timeouts
       if (this.recordingTimeout) {
         clearTimeout(this.recordingTimeout);
         this.recordingTimeout = null;
@@ -218,13 +151,11 @@ export class AudioProcessor {
     this.isProcessing = true;
 
     try {
-      // Create audio blob
       const audioBlob = new Blob(this.audioChunks, { 
         type: this.mediaRecorder?.mimeType || 'audio/webm' 
       });
 
-      // Check minimum duration (approximate)
-      if (audioBlob.size < 1000) { // Very small file, likely no speech
+      if (audioBlob.size < 1000) {
         console.log('Recording too short, skipping transcription');
         this.startNextRecording();
         return;
@@ -234,11 +165,9 @@ export class AudioProcessor {
         size: audioBlob.size,
         type: audioBlob.type,
         chunks: this.audioChunks.length,
-        language: this.currentLanguage,
-        platform: this.isIOS ? 'iOS' : 'Desktop'
+        language: this.currentLanguage
       });
 
-      // Send to transcription with language preference
       const result = await this.transcribeWithWhisper(audioBlob);
       
       if (result.text && result.text.trim()) {
@@ -266,66 +195,41 @@ export class AudioProcessor {
 
   private async transcribeWithWhisper(audioBlob: Blob): Promise<{ text: string; language?: string }> {
     try {
-      // Convert to the format expected by Whisper API
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       let audioFile: File;
       
-      if (this.isIOS && audioBlob.type.includes('m4a')) {
-        audioFile = new File([audioBlob], 'audio.m4a', {
-          type: 'audio/m4a'
-        });
-      } else if (this.isIOS && audioBlob.type.includes('mp4')) {
-        audioFile = new File([audioBlob], 'audio.mp4', {
-          type: 'audio/mp4'
-        });
+      if (isIOS && audioBlob.type.includes('mp4')) {
+        audioFile = new File([audioBlob], 'audio.mp4', { type: 'audio/mp4' });
+      } else if (isIOS && audioBlob.type.includes('aac')) {
+        audioFile = new File([audioBlob], 'audio.aac', { type: 'audio/aac' });
       } else {
-        audioFile = new File([audioBlob], 'audio.webm', {
-          type: audioBlob.type
-        });
+        audioFile = new File([audioBlob], 'audio.webm', { type: audioBlob.type });
       }
 
-      // Call Netlify function for Whisper transcription
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('model', 'whisper-1');
       formData.append('language', this.currentLanguage);
 
-      console.log(`Sending transcription request with language: ${this.currentLanguage} from ${this.isIOS ? 'iOS' : 'Desktop'}`);
+      console.log(`Sending transcription request with language: ${this.currentLanguage}`);
 
-      // iOS might need longer timeout
-      const timeoutMs = this.isIOS ? 60000 : 30000;
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const response = await fetch('/.netlify/functions/transcribe-audio', {
+        method: 'POST',
+        body: formData
+      });
 
-      try {
-        const response = await fetch('/.netlify/functions/transcribe-audio', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Whisper API error:', response.status, errorText);
-          throw new Error(`Transcription failed: ${response.status}`);
-        }
-
-        const result = await response.json();
-        
-        return {
-          text: result.text || '',
-          language: result.language || this.currentLanguage
-        };
-
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          throw new Error('Transcription timeout - please try speaking more clearly');
-        }
-        throw error;
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Whisper API error:', response.status, errorText);
+        throw new Error(`Transcription failed: ${response.status}`);
       }
+
+      const result = await response.json();
+      
+      return {
+        text: result.text || '',
+        language: result.language || this.currentLanguage
+      };
 
     } catch (error) {
       console.error('Whisper transcription error:', error);
@@ -336,17 +240,15 @@ export class AudioProcessor {
   private startNextRecording(): void {
     this.isProcessing = false;
     
-    // Start next recording if not paused - longer delay for iOS
     if (!this.isPaused && this.stream) {
-      const delay = this.isIOS ? 1000 : 500;
       setTimeout(() => {
         this.startRecording();
-      }, delay);
+      }, 500);
     }
   }
 
   pauseRecording(): void {
-    console.log(`Pausing recording on ${this.isIOS ? 'iOS' : 'Desktop'}...`);
+    console.log('Pausing recording...');
     this.isPaused = true;
     
     if (this.isRecording) {
@@ -355,31 +257,27 @@ export class AudioProcessor {
   }
 
   resumeRecording(): void {
-    console.log(`Resuming recording on ${this.isIOS ? 'iOS' : 'Desktop'}...`);
+    console.log('Resuming recording...');
     this.isPaused = false;
     this.isProcessing = false;
     
     if (this.stream) {
-      // Longer delay for iOS to ensure clean audio separation
-      const delay = this.isIOS ? 1500 : 1000;
       setTimeout(() => {
         this.startRecording();
-      }, delay);
+      }, 1000);
     }
   }
 
   stopContinuousStreaming(): void {
-    console.log(`Stopping continuous streaming on ${this.isIOS ? 'iOS' : 'Desktop'}...`);
+    console.log('Stopping continuous streaming...');
     
     this.isPaused = false;
     this.isProcessing = false;
     
-    // Stop current recording
     if (this.isRecording) {
       this.stopCurrentRecording();
     }
 
-    // Clear timeouts
     if (this.recordingTimeout) {
       clearTimeout(this.recordingTimeout);
       this.recordingTimeout = null;
@@ -389,26 +287,22 @@ export class AudioProcessor {
       this.silenceTimeout = null;
     }
 
-    // Stop media stream
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
       this.stream = null;
     }
 
-    // Clear MediaRecorder
     this.mediaRecorder = null;
     this.audioChunks = [];
     this.isRecording = false;
   }
 
-  // Method for mobile to manually restart recognition (compatibility)
   restartRecording(): void {
     if (!this.isPaused && !this.isProcessing && this.stream) {
       this.startRecording();
     }
   }
 
-  // Get supported languages for display
   getSupportedLanguages(): { code: SupportedLanguage; name: string }[] {
     return [
       { code: 'auto', name: 'Auto Detect' },
@@ -418,12 +312,10 @@ export class AudioProcessor {
     ];
   }
 
-  // Check if a language is supported
   isLanguageSupported(language: string): boolean {
     return ['auto', 'en', 'hi', 'ar'].includes(language);
   }
 
-  // Get language display name
   getLanguageDisplayName(language: SupportedLanguage): string {
     const names = {
       'auto': 'Auto Detect',
@@ -432,10 +324,5 @@ export class AudioProcessor {
       'ar': 'العربية (Arabic)'
     };
     return names[language] || 'Unknown';
-  }
-
-  // Get iOS status
-  getIsIOS(): boolean {
-    return this.isIOS;
   }
 }
