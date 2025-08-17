@@ -191,6 +191,9 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up text-base sm:text-lg`}>
               {getStatusMessage()}
             </p>
+            <p className="text-gray-300 text-sm max-w-md mx-auto mt-4 animate-fade-in-up">
+              Hii this is humo a voice companion who will detect your emotions and try to comfort you and if it needs to be improved then give use feedback we will try to update it in upcoming MVP
+            </p>
           </div>
 
           <div className="flex justify-center mb-6">
