@@ -11,8 +11,9 @@ export class AudioProcessor {
   private recordingTimeout: number | null = null;
   private silenceTimeout: number | null = null;
   private isProcessing: boolean = false;
-  private currentLanguage: SupportedLanguage = 'auto';
+  private currentLanguage: SupportedLanguage = 'auto'; // Default to auto-detect
 
+  // Configuration
   private readonly MAX_RECORDING_TIME = 30000; // 30 seconds
   private readonly SILENCE_TIMEOUT = 3000; // 3 seconds of silence
   private readonly MIN_RECORDING_TIME = 1000; // 1 second minimum
@@ -21,11 +22,13 @@ export class AudioProcessor {
     console.log('AudioProcessor initialized for OpenAI Whisper with multi-language support');
   }
 
+  // Set the language for transcription
   setLanguage(language: SupportedLanguage): void {
     this.currentLanguage = language;
     console.log(`AudioProcessor language set to: ${language}`);
   }
 
+  // Get current language setting
   getCurrentLanguage(): SupportedLanguage {
     return this.currentLanguage;
   }
@@ -40,11 +43,12 @@ export class AudioProcessor {
     this.currentLanguage = language;
 
     try {
+      // Request microphone access
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 16000,
+          sampleRate: 16000, // Optimal for Whisper
         }
       });
 
@@ -53,12 +57,9 @@ export class AudioProcessor {
       
       await this.startRecording();
       console.log(`Started continuous audio streaming for Whisper (language: ${language})`);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error accessing microphone:', error);
-      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
-        throw new Error('Microphone permission was denied. Please allow microphone access in your browser settings.');
-      }
-      throw new Error('Failed to access microphone. Please check permissions and ensure your connection is secure (HTTPS).');
+      throw new Error('Failed to access microphone. Please check permissions.');
     }
   }
 
@@ -66,30 +67,29 @@ export class AudioProcessor {
     if (!this.stream || this.isPaused || this.isProcessing) return;
 
     try {
+      // Clear any existing chunks
       this.audioChunks = [];
 
-      // Safari/iOS is very specific about supported MIME types.
-      const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      
+      // Create MediaRecorder with optimal settings for Whisper
+      const options: MediaRecorderOptions = {
+        mimeType: 'audio/webm;codecs=opus', // Fallback to supported format
+      };
+
+      // Try different formats in order of preference
       const supportedFormats = [
-        // Prioritize iOS-friendly formats first if on an Apple device
-        ...(isAppleDevice ? ['audio/mp4', 'audio/aac'] : []), 
         'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        // Fallback
+        'audio/mp4;codecs=mp4a.40.2',
         'audio/webm',
+        'audio/mp4'
       ];
 
-      let selectedFormat: string | undefined = supportedFormats.find(format => MediaRecorder.isTypeSupported(format));
-
-      if (!selectedFormat) {
-          console.warn("No preferred MIME type supported. Falling back to default.");
-          selectedFormat = 'audio/webm'; // Let it try the default if none are explicitly supported
+      for (const format of supportedFormats) {
+        if (MediaRecorder.isTypeSupported(format)) {
+          options.mimeType = format;
+          break;
+        }
       }
-      
-      console.log(`Using MIME type: ${selectedFormat}`);
 
-      const options: MediaRecorderOptions = { mimeType: selectedFormat };
       this.mediaRecorder = new MediaRecorder(this.stream, options);
       
       this.mediaRecorder.ondataavailable = (event) => {
@@ -104,18 +104,19 @@ export class AudioProcessor {
 
       this.mediaRecorder.onerror = (event) => {
         console.error('MediaRecorder error:', event);
-        // Attempt to recover by restarting the recording process
-        this.startNextRecording();
       };
 
-      this.mediaRecorder.start(250); // Collect chunks every 250ms
+      // Start recording
+      this.mediaRecorder.start(250); // Collect data every 250ms
       this.isRecording = true;
       this.onSpeechStartCallback?.();
 
+      // Set maximum recording time
       this.recordingTimeout = setTimeout(() => {
         this.stopCurrentRecording();
       }, this.MAX_RECORDING_TIME) as unknown as number;
 
+      // Set silence detection timeout
       this.resetSilenceTimeout();
 
       console.log('Recording started');
@@ -131,20 +132,19 @@ export class AudioProcessor {
     }
 
     this.silenceTimeout = setTimeout(() => {
-      if (Date.now() - (this.mediaRecorder?.start || 0) > this.MIN_RECORDING_TIME) {
-        console.log('Silence detected, stopping recording');
-        this.stopCurrentRecording();
-      }
+      console.log('Silence detected, stopping recording');
+      this.stopCurrentRecording();
     }, this.SILENCE_TIMEOUT) as unknown as number;
   }
-  
+
   private stopCurrentRecording(): void {
     if (!this.mediaRecorder || !this.isRecording) return;
-  
+
     try {
       this.mediaRecorder.stop();
       this.isRecording = false;
-  
+
+      // Clear timeouts
       if (this.recordingTimeout) {
         clearTimeout(this.recordingTimeout);
         this.recordingTimeout = null;
@@ -153,31 +153,27 @@ export class AudioProcessor {
         clearTimeout(this.silenceTimeout);
         this.silenceTimeout = null;
       }
-  
+
       console.log('Recording stopped');
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'InvalidStateError') {
-        console.warn('Tried to stop an already stopped recorder.');
-      } else {
-        console.error('Error stopping recording:', error);
-      }
+      console.error('Error stopping recording:', error);
     }
   }
 
   private async processRecording(): Promise<void> {
-    if (this.audioChunks.length === 0 || this.isProcessing) {
-      if (!this.isProcessing) this.startNextRecording();
-      return;
-    }
+    if (this.audioChunks.length === 0 || this.isProcessing) return;
 
     this.isProcessing = true;
 
     try {
-      const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
-      const audioBlob = new Blob(this.audioChunks, { type: mimeType });
+      // Create audio blob
+      const audioBlob = new Blob(this.audioChunks, { 
+        type: this.mediaRecorder?.mimeType || 'audio/webm' 
+      });
 
-      if (audioBlob.size < 1000) {
-        console.log('Recording too short, skipping transcription.');
+      // Check minimum duration (approximate)
+      if (audioBlob.size < 1000) { // Very small file, likely no speech
+        console.log('Recording too short, skipping transcription');
         this.startNextRecording();
         return;
       }
@@ -185,19 +181,27 @@ export class AudioProcessor {
       console.log('Processing audio blob:', {
         size: audioBlob.size,
         type: audioBlob.type,
+        chunks: this.audioChunks.length,
         language: this.currentLanguage
       });
 
-      const result = await this.transcribeWithWhisper(audioBlob, mimeType);
+      // Send to transcription with language preference
+      const result = await this.transcribeWithWhisper(audioBlob);
       
       if (result.text && result.text.trim()) {
+        console.log('Whisper transcript:', {
+          text: result.text,
+          detectedLanguage: result.language,
+          requestedLanguage: this.currentLanguage
+        });
+        
         this.onTranscriptUpdateCallback?.({
           text: result.text.trim(),
           final: true,
           language: result.language
         });
       } else {
-        console.log('No speech detected in audio.');
+        console.log('No speech detected in audio');
         this.startNextRecording();
       }
 
@@ -207,19 +211,18 @@ export class AudioProcessor {
     }
   }
 
-  private async transcribeWithWhisper(audioBlob: Blob, mimeType: string): Promise<{ text: string; language?: string }> {
+  private async transcribeWithWhisper(audioBlob: Blob): Promise<{ text: string; language?: string }> {
     try {
-        const fileExtension = mimeType.split('/')[1].split(';')[0];
-        const filename = `audio.${fileExtension}`;
-        const audioFile = new File([audioBlob], filename, { type: mimeType });
+      // Convert to the format expected by Whisper API
+      const audioFile = new File([audioBlob], 'audio.webm', {
+        type: audioBlob.type
+      });
 
+      // Call Netlify function for Whisper transcription
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('model', 'whisper-1');
-      if (this.currentLanguage !== 'auto') {
-        formData.append('language', this.currentLanguage);
-      }
-      formData.append('response_format', 'json');
+      formData.append('language', this.currentLanguage); // Send current language preference
 
       console.log(`Sending transcription request with language: ${this.currentLanguage}`);
 
@@ -236,6 +239,7 @@ export class AudioProcessor {
 
       const result = await response.json();
       
+      // Return both text and detected language
       return {
         text: result.text || '',
         language: result.language || this.currentLanguage
@@ -250,6 +254,7 @@ export class AudioProcessor {
   private startNextRecording(): void {
     this.isProcessing = false;
     
+    // Start next recording if not paused
     if (!this.isPaused && this.stream) {
       setTimeout(() => {
         this.startRecording();
@@ -257,7 +262,7 @@ export class AudioProcessor {
     }
   }
 
-  public pauseRecording(): void {
+  pauseRecording(): void {
     console.log('Pausing recording...');
     this.isPaused = true;
     
@@ -266,40 +271,81 @@ export class AudioProcessor {
     }
   }
 
-  public resumeRecording(): void {
+  resumeRecording(): void {
     console.log('Resuming recording...');
     this.isPaused = false;
     this.isProcessing = false;
     
     if (this.stream) {
-      // Add a small delay to ensure the audio context is ready
       setTimeout(() => {
         this.startRecording();
-      }, 1000); 
+      }, 1000);
     }
   }
 
-  public stopContinuousStreaming(): void {
+  stopContinuousStreaming(): void {
     console.log('Stopping continuous streaming...');
     
-    this.isPaused = true; // Set to paused to prevent automatic restarts
+    this.isPaused = false;
+    this.isProcessing = false;
     
+    // Stop current recording
     if (this.isRecording) {
       this.stopCurrentRecording();
     }
 
-    if (this.recordingTimeout) clearTimeout(this.recordingTimeout);
-    if (this.silenceTimeout) clearTimeout(this.silenceTimeout);
-    this.recordingTimeout = null;
-    this.silenceTimeout = null;
+    // Clear timeouts
+    if (this.recordingTimeout) {
+      clearTimeout(this.recordingTimeout);
+      this.recordingTimeout = null;
+    }
+    if (this.silenceTimeout) {
+      clearTimeout(this.silenceTimeout);
+      this.silenceTimeout = null;
+    }
 
+    // Stop media stream
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
       this.stream = null;
     }
 
+    // Clear MediaRecorder
     this.mediaRecorder = null;
     this.audioChunks = [];
     this.isRecording = false;
+  }
+
+  // Method for mobile to manually restart recognition (compatibility)
+  restartRecording(): void {
+    if (!this.isPaused && !this.isProcessing && this.stream) {
+      this.startRecording();
+    }
+  }
+
+  // Get supported languages for display
+  getSupportedLanguages(): { code: SupportedLanguage; name: string }[] {
+    return [
+      { code: 'auto', name: 'Auto Detect' },
+      { code: 'en', name: 'English' },
+      { code: 'hi', name: 'हिन्दी (Hindi)' },
+      { code: 'ar', name: 'العربية (Arabic)' }
+    ];
+  }
+
+  // Check if a language is supported
+  isLanguageSupported(language: string): boolean {
+    return ['auto', 'en', 'hi', 'ar'].includes(language);
+  }
+
+  // Get language display name
+  getLanguageDisplayName(language: SupportedLanguage): string {
+    const names = {
+      'auto': 'Auto Detect',
+      'en': 'English',
+      'hi': 'हिन्दी (Hindi)',
+      'ar': 'العربية (Arabic)'
+    };
+    return names[language] || 'Unknown';
   }
 }

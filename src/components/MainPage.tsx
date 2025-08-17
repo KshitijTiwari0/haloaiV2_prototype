@@ -24,6 +24,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [isRTL, setIsRTL] = useState(false);
 
+  // Initialize language state from companion
   useEffect(() => {
     const language = companion.getCurrentLanguage();
     setCurrentLanguage(language);
@@ -43,6 +44,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     setCurrentLanguage(language);
     setIsRTL(companion.isRTL());
     
+    // Clear detected language if switching to a specific language
     if (language !== 'auto') {
       setDetectedLanguage(null);
     }
@@ -56,6 +58,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       setIsCallActive(true);
       setError(null);
 
+      // Setup UI callbacks for avatar state
       companion.setOnSpeechStart(() => {
         console.log('Speech started');
         setIsUserSpeaking(true);
@@ -69,7 +72,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
       companion.setOnProcessingStart(() => {
         console.log('Processing started');
         setIsProcessing(true);
-        setIsUserSpeaking(false);
+        setIsUserSpeaking(false); // Stop user speaking when processing starts
       });
       
       companion.setOnProcessingEnd(() => {
@@ -77,10 +80,11 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         setIsProcessing(false);
       });
 
+      // Setup AI speaking callbacks
       companion.setOnAISpeakingStart(() => {
         console.log('AI speaking started');
         setIsAISpeaking(true);
-        setIsProcessing(false);
+        setIsProcessing(false); // Stop processing when AI starts speaking
       });
 
       companion.setOnAISpeakingEnd(() => {
@@ -88,6 +92,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
         setIsAISpeaking(false);
       });
 
+      // Setup language detection callback
       companion.setOnLanguageDetected((language: string) => {
         console.log('Language detected:', language);
         setDetectedLanguage(language);
@@ -122,6 +127,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     }
   }, [companion, isCallActive]);
 
+  // Get status message based on current state
   const getStatusMessage = () => {
     if (error) return "An error occurred. Please try again.";
     if (!isCallActive) return "Tap the mic to start speaking";
@@ -131,6 +137,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     return "You can speak now...";
   };
 
+  // Get status color based on current state
   const getStatusColor = () => {
     if (error) return "text-red-400";
     if (!isCallActive) return "text-gray-400";
@@ -140,175 +147,99 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
     return "text-sky-400";
   };
 
-  const getMicButtonClass = () => {
-    let baseClass = "relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ";
-    
-    if (error) {
-      return baseClass + "bg-red-500/20 border-2 border-red-400 text-red-400 hover:bg-red-500/30";
-    }
-    
-    if (!isCallActive) {
-      return baseClass + "bg-gradient-to-br from-blue-500/30 to-purple-500/30 border-2 border-blue-400 text-blue-400 hover:from-blue-500/40 hover:to-purple-500/40 hover:scale-105";
-    }
-    
-    if (isAISpeaking) {
-      return baseClass + "bg-gradient-to-br from-emerald-500/30 to-green-500/30 border-2 border-emerald-400 text-emerald-400 animate-pulse";
-    }
-    
-    if (isProcessing) {
-      return baseClass + "bg-gradient-to-br from-purple-500/30 to-pink-500/30 border-2 border-purple-400 text-purple-400 animate-spin";
-    }
-    
-    if (isUserSpeaking) {
-      return baseClass + "bg-gradient-to-br from-pink-500/30 to-red-500/30 border-2 border-pink-400 text-pink-400 animate-pulse scale-110";
-    }
-    
-    return baseClass + "bg-gradient-to-br from-sky-500/30 to-blue-500/30 border-2 border-sky-400 text-sky-400 hover:scale-105";
-  };
-
-  const getActivityIndicators = () => {
-    const indicators = [];
-    
-    if (isUserSpeaking) {
-      indicators.push(
-        <div key="user-speaking" className="flex items-center gap-2 px-4 py-2 rounded-full bg-pink-500/20 border border-pink-400/30">
-          <Activity className="w-4 h-4 text-pink-400 animate-pulse" />
-          <span className="text-pink-400 text-sm">Speaking</span>
-        </div>
-      );
-    }
-    
-    if (isProcessing) {
-      indicators.push(
-        <div key="processing" className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-400/30">
-          <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-purple-400 text-sm">Processing</span>
-        </div>
-      );
-    }
-    
-    if (isAISpeaking) {
-      indicators.push(
-        <div key="ai-speaking" className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/20 border border-emerald-400/30">
-          <Volume2 className="w-4 h-4 text-emerald-400 animate-pulse" />
-          <span className="text-emerald-400 text-sm">AI Speaking</span>
-        </div>
-      );
-    }
-    
-    return indicators;
-  };
-
   return (
     <div className={`relative min-h-screen text-white ${isRTL ? 'rtl' : 'ltr'}`}>
       <BackgroundFX />
-      
-      <div className="absolute inset-0 flex flex-col items-center justify-between p-6">
+      <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6">
         {/* Header */}
-        <div className="w-full flex justify-between items-start">
-          <div className="flex items-center gap-4">
+        <div className="w-full flex justify-between items-center">
+          <div className="flex items-center space-x-2 text-sm text-gray-200">
+            <UserIcon size={16} />
+            <span className="hidden sm:inline">{user?.email}</span>
+          </div>
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <LanguageSelector
               currentLanguage={currentLanguage}
               onLanguageChange={handleLanguageChange}
+              detectedLanguage={detectedLanguage}
             />
-            {detectedLanguage && currentLanguage === 'auto' && (
-              <div className="px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30">
-                <span className="text-blue-400 text-xs">Detected: {detectedLanguage}</span>
-              </div>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {user && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm">
-                <UserIcon className="w-4 h-4" />
-                <span className="text-sm">{user.email}</span>
-              </div>
-            )}
             <button
               onClick={handleSignOut}
-              className="p-2 rounded-full bg-red-500/20 border border-red-400/30 text-red-400 hover:bg-red-500/30 transition-colors"
-              title="Sign Out"
+              className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut size={16} />
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="flex flex-col items-center gap-8">
-          {/* AI Avatar */}
-          <AIAvatar
-            isActive={isCallActive}
-            isSpeaking={isAISpeaking}
-            isListening={isUserSpeaking}
+        <div className="w-full max-w-lg text-center flex flex-col items-center justify-center flex-grow">
+          <AIAvatar 
+            isUserSpeaking={isUserSpeaking}
+            isAISpeaking={isAISpeaking}
             isProcessing={isProcessing}
+            isListening={isCallActive && !isUserSpeaking && !isProcessing && !isAISpeaking}
           />
-
-          {/* Status Message */}
-          <div className="text-center">
-            <h1 className={`text-2xl font-bold ${getStatusColor()} mb-2`}>
-              {getStatusMessage()}
+          
+          <div className="mb-6">
+            <h1 className="text-3xl sm:text-4xl font-bold mb-2 animate-fade-in-up">
+              <span className="text-white">humo</span>
+              <span className="text-pink-500 text-glow-pink">.ai</span>
             </h1>
-            {isCallActive && (
-              <p className="text-gray-400 text-sm">
-                Voice conversation is active
-              </p>
-            )}
+            <p className={`transition-colors duration-300 ${getStatusColor()} animate-fade-in-up text-base sm:text-lg`}>
+              {getStatusMessage()}
+            </p>
           </div>
 
-          {/* Activity Indicators */}
-          {getActivityIndicators().length > 0 && (
-            <div className="flex gap-3 flex-wrap justify-center">
-              {getActivityIndicators()}
-            </div>
-          )}
+          <div className="flex justify-center mb-6">
+            {!isCallActive ? (
+              <button
+                onClick={handleStartCall}
+                disabled={isProcessing}
+                className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-emerald-500 hover:bg-emerald-600 shadow-xl disabled:bg-gray-600 disabled:cursor-not-allowed hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-300/60"
+              >
+                <Mic />
+              </button>
+            ) : (
+              <button
+                onClick={handleEndCall}
+                className="w-20 h-20 rounded-full flex items-center justify-center text-2xl transition-all duration-300 bg-red-500 hover:bg-red-600 shadow-xl hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-300/60"
+              >
+                <MicOff />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Bottom Controls */}
-        <div className="flex flex-col items-center gap-6">
-          {/* Main Mic Button */}
-          <button
-            onClick={isCallActive ? handleEndCall : handleStartCall}
-            className={getMicButtonClass()}
-            disabled={isProcessing}
-            aria-label={isCallActive ? "End conversation" : "Start conversation"}
-          >
-            {isCallActive ? (
-              <MicOff className="w-10 h-10" />
-            ) : (
-              <Mic className="w-10 h-10" />
-            )}
-            
-            {/* Pulse animation for active states */}
-            {(isUserSpeaking || isAISpeaking) && (
-              <>
-                <div className="absolute inset-0 rounded-full border-2 border-current animate-ping opacity-20"></div>
-                <div className="absolute inset-0 rounded-full border-2 border-current animate-ping opacity-10 animation-delay-75"></div>
-              </>
-            )}
-          </button>
-
-          {/* Help Text */}
-          <div className="text-center text-gray-400 text-sm max-w-md">
-            {!isCallActive ? (
-              <p>
-                Start a voice conversation with your AI companion. 
-                Choose your preferred language from the selector above.
-              </p>
-            ) : (
-              <p>
-                Speak naturally and the AI will respond. 
-                Tap the microphone again to end the conversation.
-              </p>
-            )}
+        {/* Footer */}
+        <div className="w-full">
+          <div className="flex justify-center gap-2 sm:gap-3 mb-4 flex-wrap">
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isCallActive ? 'text-sky-300' : 'text-gray-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${isCallActive ? 'bg-sky-400 animate-pulse' : 'bg-gray-500'}`} />
+              <span>Connected</span>
+              <Activity size={14} className={`${isCallActive ? 'text-sky-400' : 'text-gray-500'}`} />
+            </div>
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isUserSpeaking ? 'text-pink-300' : 'text-gray-400'}`}>
+              <Volume2 size={14} className={`${isUserSpeaking ? 'text-pink-400 animate-pulse' : 'text-gray-500'}`} />
+              <span>Speaking</span>
+            </div>
+            <div className={`glass px-3 py-1.5 rounded-full text-xs sm:text-sm flex items-center gap-2 transition-all ${isAISpeaking ? 'text-emerald-300' : 'text-gray-400'}`}>
+              <MessageSquare size={14} className={`${isAISpeaking ? 'text-emerald-400 animate-pulse' : 'text-gray-500'}`} />
+              <span>AI Response</span>
+            </div>
           </div>
 
-          {/* Error Message */}
           {error && (
-            <div className="px-4 py-2 rounded-lg bg-red-500/20 border border-red-400/30 text-red-400 text-sm text-center max-w-md">
-              <MessageSquare className="w-4 h-4 inline mr-2" />
-              {error}
+            <div className="mt-4 p-3 glass border border-red-500/50 rounded-xl text-red-200 text-sm max-w-md mx-auto">
+              <p>❌ {error}</p>
+            </div>
+          )}
+
+          {detectedLanguage && detectedLanguage !== currentLanguage && currentLanguage !== 'auto' && (
+            <div className="mt-4 p-3 glass border border-amber-500/50 rounded-xl text-amber-200 text-sm max-w-md mx-auto">
+              <p>💡 Detected {companion.getLanguageDisplayName(detectedLanguage as SupportedLanguage)}. 
+                 Switch to "Auto Detect" for seamless multi-language support.</p>
             </div>
           )}
         </div>
