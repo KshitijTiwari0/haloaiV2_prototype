@@ -192,7 +192,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
               {getStatusMessage()}
             </p>
             <p className="text-gray-300 text-sm max-w-md mx-auto mt-4 animate-fade-in-up">
-              Hii this is humo a voice companion who will detect your emotions and try to comfort you and if it needs to be improved then give use feedback we will try to update it in upcoming MVP
+              Hi, I'm humo. I listen to the emotions in your voice to provide comfort and support. As I'm still learning, please share your feedback to help me improve in the next update
             </p>
           </div>
 
