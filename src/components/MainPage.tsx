@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, User as UserIcon, LogOut, Activity, Volume2, MessageSquare, X } from 'lucide-react';
 import { AIAvatar } from './AIAvatar';
 import BackgroundFX from './BackgroundFX';
 import { LanguageSelector } from './LanguageSelector';
@@ -23,6 +23,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('auto');
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [isRTL, setIsRTL] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(true);
 
   // Initialize language state from companion
   useEffect(() => {
@@ -229,6 +230,18 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
               <span>AI Response</span>
             </div>
           </div>
+
+          {showDisclaimer && (
+            <div className="mt-4 p-3 glass border border-blue-500/50 rounded-xl text-blue-200 text-sm max-w-md mx-auto flex items-start">
+              <div className="flex-grow">
+                <h4 className="font-bold mb-1">Data Usage Notice</h4>
+                <p className="text-xs">To improve your experience, your conversations will be used to fine-tune our AI models. Your data will be handled with privacy and care.</p>
+              </div>
+              <button onClick={() => setShowDisclaimer(false)} className="ml-2 p-1 rounded-full hover:bg-white/10">
+                <X size={16} />
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 p-3 glass border border-red-500/50 rounded-xl text-red-200 text-sm max-w-md mx-auto">
