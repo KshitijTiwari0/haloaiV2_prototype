@@ -33,9 +33,9 @@ export const LoginPage: React.FC = () => {
               <span className="text-pink-500 text-glow-pink">.ai</span>
             </h1>
             <h2 className="text-2xl font-semibold text-white mb-2">
-              Welcome Back!
+              Let's Get Started!
             </h2>
-            <p className="text-gray-300">Sign in with your Google account to continue</p>
+            <p className="text-gray-300">Sign in or create an account with Google</p>
           </div>
 
           {error && (
@@ -51,11 +51,12 @@ export const LoginPage: React.FC = () => {
               className="w-full bg-white hover:bg-gray-100 disabled:bg-gray-600 disabled:cursor-not-allowed text-gray-900 font-medium py-4 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-3 hover:scale-[1.01] active:scale-95 shadow-xl"
             >
               <Chrome size={20} />
-              <span>{loading ? 'Signing in...' : 'Continue with Google'}</span>
+              <span>{loading ? 'Please wait...' : 'Continue with Google'}</span>
             </button>
 
             <div className="text-center text-xs text-gray-400 mt-4">
-              By signing in, you agree to our terms of service and privacy policy
+              <p>New to humo.ai? Google will create your account automatically</p>
+              <p className="mt-1">By continuing, you agree to our terms of service and privacy policy</p>
             </div>
           </div>
         </div>

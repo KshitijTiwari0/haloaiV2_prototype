@@ -108,10 +108,10 @@ function App() {
     );
 
     // Log configuration summary for debugging
-    console.log('Configuration Summary:', {
+    .log('Configuration Summary:', {
       hasOpenAI: !!OPENAI_API_KEY,
       hasElevenLabs: !!ELEVEN_LABS_API_KEY,
-      configSummary: configManager.getConfigSummary()
+      cconsoleonfigSummary: configManager.getConfigSummary()
     });
 
     return () => {
