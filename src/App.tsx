@@ -108,11 +108,11 @@ function App() {
     );
 
     // Log configuration summary for debugging
-    .log('Configuration Summary:', {
-      hasOpenAI: !!OPENAI_API_KEY,
-      hasElevenLabs: !!ELEVEN_LABS_API_KEY,
-      cconsoleonfigSummary: configManager.getConfigSummary()
-    });
+    // console.log('Configuration Summary:', {
+    //   hasOpenAI: !!OPENAI_API_KEY,
+    //   hasElevenLabs: !!ELEVEN_LABS_API_KEY,
+    //   cconsoleonfigSummary: configManager.getConfigSummary()
+    // });
 
     return () => {
       subscription.unsubscribe();
