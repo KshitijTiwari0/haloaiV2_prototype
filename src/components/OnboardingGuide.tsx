@@ -8,35 +8,66 @@ interface OnboardingGuideProps {
 
 export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({ steps, onClose }) => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 0, height: 0 });
+  const [style, setStyle] = useState<React.CSSProperties>({ opacity: 0 });
   const step = steps[currentStep];
   const targetRef = useRef<Element | null>(null);
 
   useEffect(() => {
     const updatePosition = () => {
-      targetRef.current = document.querySelector(step.target);
+      // Clear previous highlight
       if (targetRef.current) {
-        const rect = targetRef.current.getBoundingClientRect();
-        setPosition({
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-        });
-        targetRef.current.classList.add('onboarding-highlight');
+        targetRef.current.classList.remove('onboarding-highlight');
+      }
+
+      const targetElement = document.querySelector(step.target);
+      targetRef.current = targetElement;
+
+      if (targetElement) {
+        const rect = targetElement.getBoundingClientRect();
+        targetElement.classList.add('onboarding-highlight');
+
+        const offset = 12;
+        const tooltipMaxWidth = 320; // from max-w-xs class
+        const viewportPadding = 16;
+        
+        const newStyle: React.CSSProperties = {
+          opacity: 1,
+          transition: 'top 0.3s ease, left 0.3s ease, opacity 0.3s ease',
+        };
+
+        switch (step.placement) {
+          case 'bottom':
+          default:
+            newStyle.top = rect.top + rect.height + offset;
+            let idealLeft = rect.left + rect.width / 2 - tooltipMaxWidth / 2;
+            
+            // Adjust to stay within viewport boundaries
+            if (idealLeft + tooltipMaxWidth > window.innerWidth - viewportPadding) {
+              idealLeft = window.innerWidth - tooltipMaxWidth - viewportPadding;
+            }
+            if (idealLeft < viewportPadding) {
+              idealLeft = viewportPadding;
+            }
+            newStyle.left = idealLeft;
+            break;
+          // Other placements like 'top', 'left', 'right' can be added here
+        }
+        setStyle(newStyle);
       }
     };
 
-    updatePosition();
+    // Delay to ensure the target element is rendered and has its final dimensions
+    const timeoutId = setTimeout(updatePosition, 100); 
     window.addEventListener('resize', updatePosition);
 
     return () => {
+      clearTimeout(timeoutId);
       window.removeEventListener('resize', updatePosition);
       if (targetRef.current) {
         targetRef.current.classList.remove('onboarding-highlight');
       }
     };
-  }, [currentStep, step.target]);
+  }, [currentStep, step.target, step.placement]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -51,30 +82,6 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({ steps, onClose
       setCurrentStep(currentStep - 1);
     }
   };
-  
-  const getTooltipPosition = () => {
-    const offset = 12; // 12px offset from the target element
-    switch (step.placement) {
-      case 'bottom':
-        return { top: position.top + position.height + offset, left: position.left + position.width / 2 };
-      case 'top':
-        return { top: position.top - offset, left: position.left + position.width / 2, transform: 'translate(-50%, -100%)' };
-      case 'left':
-        return { top: position.top + position.height / 2, left: position.left - offset, transform: 'translate(-100%, -50%)' };
-      case 'right':
-        return { top: position.top + position.height / 2, left: position.left + position.width + offset, transform: 'translate(0, -50%)' };
-      default:
-        return { top: position.top + position.height + offset, left: position.left + position.width / 2 };
-    }
-  };
-  
-  const tooltipStyle = {
-    ...getTooltipPosition(),
-    transform: step.placement === 'bottom' 
-      ? 'translateX(-50%)' 
-      : (getTooltipPosition() as any).transform || 'translateX(-50%)',
-  };
-
 
   if (!targetRef.current) return null;
 
@@ -90,8 +97,8 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({ steps, onClose
         }
       `}</style>
       <div
-        className="absolute p-4 glass rounded-xl shadow-xl text-white max-w-xs animate-fade-in-up"
-        style={tooltipStyle}
+        className="absolute p-4 glass rounded-xl shadow-xl text-white max-w-xs"
+        style={style}
       >
         <p className="text-sm mb-4">{step.content}</p>
         <div className="flex justify-between items-center">
