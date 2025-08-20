@@ -289,3 +289,9 @@ export interface ChatCompletionRequest {
   presence_penalty?: number;
   language?: string; // Added for language context
 }
+
+export interface OnboardingStep {
+  target: string;
+  content: string;
+  placement: 'top' | 'bottom' | 'left' | 'right';
+}

@@ -7,6 +7,8 @@ import { EmotionalAICompanion } from '../utils/EmotionalAICompanion';
 import { ConfigManager, SupportedLanguage } from '../utils/ConfigManager';
 import { signOut } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { OnboardingGuide } from './OnboardingGuide';
+import { OnboardingStep } from '../types';
 
 interface MainPageProps {
   companion: EmotionalAICompanion;
@@ -24,6 +26,33 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [isRTL, setIsRTL] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    const hasOnboardingBeenShown = localStorage.getItem('onboardingShown');
+    if (!hasOnboardingBeenShown) {
+      setShowOnboarding(true);
+      localStorage.setItem('onboardingShown', 'true');
+    }
+  }, []);
+
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      target: '.language-selector-wrapper',
+      content: 'Select your preferred language here. "Auto Detect" is recommended for a seamless experience.',
+      placement: 'bottom'
+    },
+    {
+      target: '.mic-button-wrapper',
+      content: 'Tap the microphone to start and end your conversation with humo.ai.',
+      placement: 'bottom'
+    },
+    {
+      target: '.sign-out-button-wrapper',
+      content: 'Click here to sign out of your account.',
+      placement: 'bottom'
+    },
+  ];
 
   // Initialize language state from companion
   useEffect(() => {
@@ -151,6 +180,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
   return (
     <div className={`relative min-h-screen text-white ${isRTL ? 'rtl' : 'ltr'}`}>
       <BackgroundFX />
+      {showOnboarding && <OnboardingGuide steps={onboardingSteps} onClose={() => setShowOnboarding(false)} />}
       <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6">
         {/* Header */}
         <div className="w-full flex justify-between items-center">
@@ -159,18 +189,22 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             <span className="hidden sm:inline">{user?.email}</span>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
-            <LanguageSelector
-              currentLanguage={currentLanguage}
-              onLanguageChange={handleLanguageChange}
-              detectedLanguage={detectedLanguage}
-            />
-            <button
-              onClick={handleSignOut}
-              className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
-            >
-              <LogOut size={16} />
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
+            <div className="language-selector-wrapper">
+              <LanguageSelector
+                currentLanguage={currentLanguage}
+                onLanguageChange={handleLanguageChange}
+                detectedLanguage={detectedLanguage}
+              />
+            </div>
+            <div className="sign-out-button-wrapper">
+              <button
+                onClick={handleSignOut}
+                className="flex items-center space-x-2 px-3 py-2 glass hover:bg-white/10 rounded-xl transition-all text-sm active:scale-95"
+              >
+                <LogOut size={16} />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -196,7 +230,7 @@ export const MainPage: React.FC<MainPageProps> = ({ companion, configManager, us
             </p>
           </div>
 
-          <div className="flex justify-center mb-6">
+          <div className="mic-button-wrapper flex justify-center mb-6">
             {!isCallActive ? (
               <button
                 onClick={handleStartCall}
